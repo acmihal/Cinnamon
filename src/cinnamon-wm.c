@@ -26,7 +26,7 @@ enum
   MAP,
   DESTROY,
   SWITCH_WORKSPACE,
-  KILL_SWITCH_WORKSPACE,
+  SWITCH_WORKSPACE_COMPLETE,
   KILL_WINDOW_EFFECTS,
   SHOW_TILE_PREVIEW,
   HIDE_TILE_PREVIEW,
@@ -121,13 +121,12 @@ cinnamon_wm_class_init (CinnamonWMClass *klass)
 		  _cinnamon_marshal_VOID__INT_INT_INT,
 		  G_TYPE_NONE, 3,
                   G_TYPE_INT, G_TYPE_INT, G_TYPE_INT);
-  cinnamon_wm_signals[KILL_SWITCH_WORKSPACE] =
-    g_signal_new ("kill-switch-workspace",
+  cinnamon_wm_signals[SWITCH_WORKSPACE_COMPLETE] =
+    g_signal_new ("switch-workspace-complete",
 		  G_TYPE_FROM_CLASS (klass),
 		  G_SIGNAL_RUN_LAST,
 		  0,
-		  NULL, NULL,
-		  g_cclosure_marshal_VOID__VOID,
+		  NULL, NULL, NULL,
 		  G_TYPE_NONE, 0);
   cinnamon_wm_signals[KILL_WINDOW_EFFECTS] =
     g_signal_new ("kill-window-effects",
@@ -195,6 +194,7 @@ void
 cinnamon_wm_completed_switch_workspace (CinnamonWM *wm)
 {
   meta_plugin_switch_workspace_completed (wm->plugin);
+  g_signal_emit (wm, cinnamon_wm_signals[SWITCH_WORKSPACE_COMPLETE], 0);
 }
 
 /**
@@ -280,12 +280,6 @@ cinnamon_wm_completed_destroy (CinnamonWM         *wm,
                             MetaWindowActor *actor)
 {
   meta_plugin_destroy_completed (wm->plugin, actor);
-}
-
-void
-_cinnamon_wm_kill_switch_workspace (CinnamonWM      *wm)
-{
-  g_signal_emit (wm, cinnamon_wm_signals[KILL_SWITCH_WORKSPACE], 0);
 }
 
 void

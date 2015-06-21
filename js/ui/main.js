@@ -1,11 +1,12 @@
 // -*- mode: js; js-indent-level: 4; indent-tabs-mode: nil -*-
 /**
  * FILE:main.js
+ * @short_description: This is the heart of Cinnamon, the mother of everything.
  * @placesManager (PlacesManager.PlacesManager): The places manager
  * @overview (Overview.Overview): The "scale" overview 
  * @expo (Expo.Expo): The "expo" overview
  * @runDialog (RunDialog.RunDialog): The run dialog
- * @lookingGlass (LookingGlass.LookingGlass): The looking glass
+ * @lookingGlass (LookingGlass.Melange): The looking glass object
  * @wm (WindowManager.WindowManager): The window manager
  * @messageTray (MessageTray.MessageTray): The mesesage tray
  * @notificationDaemon (NotificationDaemon.NotificationDaemon): The notification daemon
@@ -14,27 +15,63 @@
  * @cinnamonDBusService (CinnamonDBus.Cinnamon): The cinnamon dbus object
  * @modalCount (int): The number of modals "pushed"
  * @modalActorFocusStack (array): Array of pushed modal actors
- * @uiGroup (Cinnamon.GenericContainer): The group containing all Cinnamon
- *                                       and Muffin actors
+ * @uiGroup (Cinnamon.GenericContainer): The group containing all Cinnamon and
+ * Muffin actors
+ *
  * @magnifier (Magnifier.Magnifier): The magnifier
  * @xdndHandler (XdndHandler.XdndHandler): The X DND handler
  * @statusIconDispatcher (StatusIconDispatcher.StatusIconDispatcher): The status icon dispatcher
  * @keyboard (Keyboard.Keyboard): The keyboard object
- * @layoutManager (Layout.LayoutManager): The layout manager
+ * @layoutManager (Layout.LayoutManager): The layout manager.
+ * \
+ * All actors that are part of the Cinnamon UI ar handled by the layout
+ * manager, which will determine when to show and hide the actors etc.
+ *
+ * @panelManager (Panel.PanelManager): The panel manager.
+ * \
+ * This is responsible for handling events relating to panels, eg. showing all
+ * panels.
+ *
  * @themeManager (ThemeManager.ThemeManager): The theme manager
- * @dynamicWorkspaces (boolean): Whether dynamic workspaces are to be used.
- *                               This is not yet implemented
- * @nWorks (int): Number of workspaces
+ * @soundManager (SoundManager.SoundManager): The sound manager
+ * @settingsManager (Settings.SettingsManager): The manager of the xlet Settings API
+ *
+ * @backgroundManager (BackgroundManager.BackgroundManager): The background
+ * manager.
+ * \
+ * This listens to changes in the GNOME background settings and mirrors them to
+ * the Cinnamon settings, since many applications have a "Set background"
+ * button that modifies the GNOME background settings.
+ *
+ * @slideshowManager (SlideshowManager.SlideshowManager): The slideshow manager.
+ * \
+ * This is responsible for managing the background slideshow, since the
+ * background "slideshow" is created by cinnamon changing the active background
+ * gsetting every x minutes.
+ *
+ * @keybindingManager (KeybindingManager.KeybindingManager): The keybinding manager
+ * @systrayManager (Systray.SystrayManager): The systray manager
+ *
+ * @osdWindow (OsdWindow.OsdWindow): Osd window that pops up when you use media
+ * keys.
  * @tracker (Cinnamon.WindowTracker): The window tracker
  * @workspace_names (array): Names of workspace
- * @background (null): Unused
- * @deskletContainer (DeskletManager.DeskletContainer): The desklet container 
+ * @deskletContainer (DeskletManager.DeskletContainer): The desklet container.
+ * \
+ * This is a container that contains all the desklets as childs. Its actor is
+ * put between @global.bottom_window_group and @global.uiGroup.
  * @software_rendering (boolean): Whether software rendering is used
  * @lg_log_file (Gio.FileOutputStream): The stream used to log looking messages
  *                                      to ~/.cinnamon/glass.log
  * @can_log (boolean): Whether looking glass log to file can be used
+ * @popup_rendering (boolean): Whether a popup is in the process of rendering
+ * @xlet_startup_error (boolean): Whether there was at least one xlet that did
+ * not manage to load
  *
- * The main file is responsible for launching Cinnamon as well as creating its components. Most components of Cinnamon can be accessed through main
+ * The main file is responsible for launching Cinnamon as well as creating its
+ * components. The C part of cinnamon calls the @start() function, which then
+ * initializes all of cinnamon. Most components of Cinnamon can be accessed
+ * through main.
  */
 
 const Clutter = imports.gi.Clutter;
@@ -120,14 +157,12 @@ let _startDate;
 let _defaultCssStylesheet = null;
 let _cssStylesheet = null;
 let dynamicWorkspaces = null;
-let nWorks = null;
 let tracker = null;
 let settingsManager = null;
 let systrayManager = null;
+let wmSettings = null;
 
 let workspace_names = [];
-
-let background = null;
 
 let applet_side = St.Side.TOP; // Kept to maintain compatibility. Doesn't seem to be used anywhere
 let deskletContainer = null;
@@ -189,6 +224,12 @@ function _initUserSession() {
     });
 }
 
+function do_shutdown_sequence() {
+    panelManager.panels.forEach(function (panel) {
+        panel.actor.hide();
+    });
+}
+
 function _reparentActor(actor, newParent) {
     let parent = actor.get_parent();
     if (parent)
@@ -212,6 +253,8 @@ function start() {
     global.logWarning = _logWarning;
     global.logError = _logError;
     global.log = _logInfo;
+
+    let cinnamonStartTime = new Date().getTime();
 
     if (global.settings.get_boolean("enable-looking-glass-logs")) {
         try {
@@ -256,7 +299,10 @@ function start() {
     // races for now we initialize it here.  It's better to
     // be predictable anyways.
     tracker = Cinnamon.WindowTracker.get_default();
+
+    let startTime = new Date().getTime();
     Cinnamon.AppSystem.get_default();
+    global.log('Cinnamon.AppSystem.get_default() started in %d ms'.format(new Date().getTime() - startTime));
 
     // The stage is always covered so Clutter doesn't need to clear it; however
     // the color is used as the default contents for the Muffin root background
@@ -287,12 +333,12 @@ function start() {
                         for (let i = 0; i < children.length; i++)
                             children[i].allocate_preferred_size(flags);
                     });
-    this.uiGroup.connect('get-preferred-width',
+    uiGroup.connect('get-preferred-width',
                     function(actor, forHeight, alloc) {
                         let width = global.stage.width;
                         [alloc.min_size, alloc.natural_size] = [width, width];
                     });
-    this.uiGroup.connect('get-preferred-height',
+    uiGroup.connect('get-preferred-height',
                     function(actor, forWidth, alloc) {
                         let height = global.stage.height;
                         [alloc.min_size, alloc.natural_size] = [height, height];
@@ -324,10 +370,8 @@ function start() {
     panelManager = new Panel.PanelManager();
 
     let startupAnimationEnabled = global.settings.get_boolean("startup-animation");
-    let desktopEffectsEnabled = global.settings.get_boolean("desktop-effects");
 
-    let do_animation = desktopEffectsEnabled &&
-                       startupAnimationEnabled &&
+    let do_animation = startupAnimationEnabled &&
                        !GLib.getenv('CINNAMON_SOFTWARE_RENDERING') &&
                        !GLib.getenv('CINNAMON_2D');
 
@@ -362,12 +406,7 @@ function start() {
 
     Meta.later_add(Meta.LaterType.BEFORE_REDRAW, _checkWorkspaces);
 
-    nWorks = global.settings.get_int("number-workspaces");
     dynamicWorkspaces = false; // This should be configurable
-
-    if (!dynamicWorkspaces) {
-        _staticWorkspaces();
-    }
     
     layoutManager.init();
     keyboard.init();
@@ -394,7 +433,8 @@ function start() {
         Scripting.runPerfScript(module, perfOutput);
     }
     
-    workspace_names = global.settings.get_strv("workspace-name-overrides");  
+    wmSettings = new Gio.Settings({schema: "org.cinnamon.desktop.wm.preferences"})
+    workspace_names = wmSettings.get_strv("workspace-names");
 
     global.screen.connect('notify::n-workspaces', _nWorkspacesChanged);
 
@@ -404,10 +444,13 @@ function start() {
 
     _nWorkspacesChanged();
 
+    startTime = new Date().getTime();
     AppletManager.init();
+    global.log('AppletManager.init() started in %d ms'.format(new Date().getTime() - startTime));
+
     DeskletManager.init();
     SearchProviderManager.init();
-    
+
     createLookingGlass();
 
     if (software_rendering && !GLib.getenv('CINNAMON_2D')) {
@@ -438,6 +481,10 @@ function start() {
         if (do_login_sound)
             soundManager.play_once_per_session('login');
     }
+
+    global.connect('shutdown', do_shutdown_sequence);
+
+    global.log('Cinnamon took %d ms to start'.format(new Date().getTime() - cinnamonStartTime));
 }
 
 function notifyCinnamon2d() {
@@ -497,7 +544,7 @@ function _fillWorkspaceNames(index) {
 function _trimWorkspaceNames(index) {
     // trim empty or out-of-bounds names from the end.
     for (let i = workspace_names.length - 1;
-            i >= 0 && (i >= nWorks || !workspace_names[i].length); --i)
+            i >= 0 && (i >= global.screen.n_workspaces || !workspace_names[i].length); --i)
     {
         workspace_names.pop();
     }
@@ -522,7 +569,7 @@ function setWorkspaceName(index, name) {
             "" :
             name);
         _trimWorkspaceNames();
-        global.settings.set_strv("workspace-name-overrides", workspace_names);
+        wmSettings.set_strv("workspace-names", workspace_names);
     }
 }
 
@@ -559,23 +606,19 @@ function hasDefaultWorkspaceName(index) {
 function _addWorkspace() {
     if (dynamicWorkspaces)
         return false;
-    nWorks++;
-    global.settings.set_int("number-workspaces", nWorks);
-    _staticWorkspaces();
+    global.screen.append_new_workspace(false, global.get_current_time());
     return true;
 }
 
 function _removeWorkspace(workspace) {
-    if (nWorks == 1 || dynamicWorkspaces)
+    if (global.screen.n_workspaces == 1 || dynamicWorkspaces)
         return false;
-    nWorks--;
     let index = workspace.index();
     if (index < workspace_names.length) {
         workspace_names.splice (index,1);
     }
     _trimWorkspaceNames();
-    global.settings.set_strv("workspace-name-overrides", workspace_names);
-    global.settings.set_int("number-workspaces", nWorks);
+    wmSettings.set_strv("workspace-names", workspace_names);
     global.screen.remove_workspace(workspace, global.get_current_time());
     return true;
 }
@@ -603,25 +646,6 @@ function moveWindowToNewWorkspace(metaWindow, switchToNewWorkspace) {
         });
     }
     metaWindow.change_workspace_by_index(global.screen.n_workspaces, true, global.get_current_time());
-}
-
-function _staticWorkspaces() {
-    let i;
-    let dif = nWorks - global.screen.n_workspaces;
-    if (dif > 0) {
-        for (let i = 0; i < dif; i++)
-            global.screen.append_new_workspace(false, global.get_current_time());
-    } else {
-        if (nWorks == 0)
-            return false;
-        for (let i = 0; i > dif; i--){
-            let removeWorkspaceIndex = global.screen.n_workspaces - 1;
-            let removeWorkspace = global.screen.get_workspace_by_index(removeWorkspaceIndex);
-            let lastRemoved = removeWorkspace._lastRemovedWindow;
-            global.screen.remove_workspace(removeWorkspace, global.get_current_time()); 
-        }    
-    }
-    return true;
 }
 
 function _checkWorkspaces() {
@@ -726,7 +750,6 @@ function _queueCheckWorkspaces() {
 }
 
 function _nWorkspacesChanged() {
-    nWorks = global.screen.n_workspaces;
     if (!dynamicWorkspaces)
         return false;
 
@@ -1181,6 +1204,8 @@ function _findModal(actor) {
  * pushModal:
  * @actor (Clutter.Actor): actor which will be given keyboard focus
  * @timestamp (int): optional timestamp
+ * @options (Meta.ModalOptions): (optional) flags to indicate that the pointer
+ * is alrady grabbed
  *
  * Ensure we are in a mode where all keyboard and mouse input goes to
  * the stage, and focus @actor. Multiple calls to this function act in
@@ -1194,15 +1219,15 @@ function _findModal(actor) {
  * @timestamp is optionally used to associate the call with a specific user
  * initiated event.  If not provided then the value of
  * global.get_current_time() is assumed.
- *
+ * 
  * Returns (boolean): true iff we successfully acquired a grab or already had one
  */
-function pushModal(actor, timestamp) {
+function pushModal(actor, timestamp, options) {
     if (timestamp == undefined)
         timestamp = global.get_current_time();
 
     if (modalCount == 0) {
-        if (!global.begin_modal(timestamp)) {
+        if (!global.begin_modal(timestamp, options ? options : 0)) {
             log('pushModal: invocation of begin_modal failed');
             return false;
         }
@@ -1295,7 +1320,7 @@ function popModal(actor, timestamp) {
  *
  * Obtains the looking glass object. Create if it does not exist
  *
- * Returns (LookingGlass.LookingGlass): looking glass object
+ * Returns (LookingGlass.Melange): looking glass object
  */
 function createLookingGlass() {
     if (lookingGlass == null) {

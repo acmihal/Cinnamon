@@ -1,21 +1,31 @@
-// -*- mode: js; js-indent-level: 4; indent-tabs-mode: nil -*-
-
+/**
+ * FILE:panel.js
+ * @short_description: The file responsible for managing panels
+ *
+ * This file is where everything about panels happens. #Main will create a
+ * #PanelManager object, which is responsible for creating and moving panels.
+ * There is also a %checkPanelUpgrade function used as a transition between the
+ * old panel settings and the new panel settings.
+ */
 const Cairo = imports.cairo;
 const Clutter = imports.gi.Clutter;
 const Lang = imports.lang;
 const Mainloop = imports.mainloop;
+const Meta = imports.gi.Meta;
 const Pango = imports.gi.Pango;
 const Cinnamon = imports.gi.Cinnamon;
 const St = imports.gi.St;
-const PopupMenu = imports.ui.popupMenu;
-const Main = imports.ui.main;
-const Tweener = imports.ui.tweener;
+
 const Applet = imports.ui.applet;
-const DND = imports.ui.dnd;
 const AppletManager = imports.ui.appletManager;
-const Util = imports.misc.util;
-const ModalDialog = imports.ui.modalDialog;
+const DND = imports.ui.dnd;
 const Gtk = imports.gi.Gtk;
+const Main = imports.ui.main;
+const ModalDialog = imports.ui.modalDialog;
+const PopupMenu = imports.ui.popupMenu;
+const SignalManager = imports.misc.signalManager;
+const Tweener = imports.ui.tweener;
+const Util = imports.misc.util;
 
 const BUTTON_DND_ACTIVATION_TIMEOUT = 250;
 
@@ -39,7 +49,7 @@ const DEFAULT_VALUES = {"panels-autohide": "false",
                         "panels-hide-delay": "0",
                         "panels-height": "25",
                         "panels-resizable": "false",
-                        "panels-scale-text-icons": "false"};
+                        "panels-scale-text-icons": "true"};
 
 const Direction = {
     LEFT  : 0,
@@ -89,15 +99,15 @@ function _unpremultiply(color) {
                                blue: blue, alpha: color.alpha });
 };
 
-/* checkPanelUpgrade:
+/**
+ * checkPanelUpgrade:
  *
- *Run from main, prior to PanelManager being initialized
+ * Run from main, prior to PanelManager being initialized
  * this handles the one-time transition between panel implementations
  * to make this transition invisible to the user.  We will evaluate the
  * desktop-layout key, and pre-set applets-enabled and panels-enabled
  * appropriately.
  */
-
 function checkPanelUpgrade()
 {
     let oldLayout = global.settings.get_string("desktop-layout");
@@ -138,7 +148,7 @@ function checkPanelUpgrade()
 }
 
 /**
- * PanelManager
+ * #PanelManager
  * 
  * @short_description: Manager of Cinnamon panels
  *
@@ -170,9 +180,9 @@ PanelManager.prototype = {
 
         this.addPanelMode = false;
 
-        global.settings.connect("changed::panels-enabled", Lang.bind(this, this._onPanelsEnabledChanged));
-        global.settings.connect("changed::panel-edit-mode", Lang.bind(this, this._onPanelEditModeChanged));
-        global.screen.connect("monitors-changed", Lang.bind(this, this._onMonitorsChanged));
+        this._panelsEnabledId = global.settings.connect("changed::panels-enabled", Lang.bind(this, this._onPanelsEnabledChanged));
+        this._panelEditModeId = global.settings.connect("changed::panel-edit-mode", Lang.bind(this, this._onPanelEditModeChanged));
+        this._monitorsChangedId = global.screen.connect("monitors-changed", Lang.bind(this, this._onMonitorsChanged));
 
         this._addOsd = new ModalDialog.InfoOSD(_("Select position of new panel. Esc to cancel."));
         this._moveOsd = new ModalDialog.InfoOSD(_("Select new position of panel. Esc to cancel."));
@@ -365,27 +375,19 @@ PanelManager.prototype = {
         return null;
     },
 
-    getAdjacentPanel: function(currentPanelObj, direction) {
-        if (!(currentPanelObj instanceof Panel))
-            return null;
-
-        if (direction == Direction.LEFT &&
-            currentPanelObj.monitorIndex == 0)
-            return null;
-        else if (direction == Direction.RIGHT &&
-                 currentPanelObj.monitorIndex == (global.screen.get_n_monitors() - 1))
-            return null;
-
-        switch (direction) {
-            case Direction.LEFT:
-                return this.getPanel(currentPanelObj.monitorIndex - 1, currentPanelObj.bottomPosition);
-                break;
-            case Direction.RIGHT:
-                return this.getPanel(currentPanelObj.monitorIndex + 1, currentPanelObj.bottomPosition);
-                break;
+    /**
+     * updatePanelsVisibility:
+     *
+     * Prompts every panel to update its visibility (show/hide). This is used
+     * by WindowManager after window map/tile/etc animations, and after popup
+     * menus close.
+     */
+    updatePanelsVisibility: function() {
+        for (let i in this.panels) {
+             if (!this.panels[i])
+                 continue;
+             this.panels[i]._updatePanelVisibility();
         }
-
-        return null;
     },
 
     /**
@@ -599,8 +601,7 @@ PanelManager.prototype = {
 } 
 
 /**
- * PanelDummy
- * 
+ * #PanelDummy
  * @short_description: Dummy panels for users to select new position of panel
  *
  * #PanelDummy creates some boxes at possible panel locations for users to 
@@ -951,76 +952,21 @@ PanelCorner.prototype = {
     }
 };
 
-function IconMenuItem() {
-    this._init.apply(this, arguments);
-}
-
-IconMenuItem.prototype = {
-    __proto__: PopupMenu.PopupBaseMenuItem.prototype,
-
-    _init: function (text, iconName, params) {
-        PopupMenu.PopupBaseMenuItem.prototype._init.call(this, params);
- 
-        let table = new St.Table({ homogeneous: false,
-                                   reactive: true });
-
-        this.label = new St.Label({ text: text });
-        this._icon = new St.Icon({ icon_name: iconName,
-                                   icon_type: St.IconType.SYMBOLIC,
-                                   style_class: 'popup-menu-icon' });
-
-        table.add(this._icon,
-                  {row: 0, col: 0, col_span: 1, x_expand: false, x_align: St.Align.START});
-
-        table.add(this.label,
-                  {row: 0, col: 1, col_span: 1, x_align: St.Align.START});
-
-        this.label.set_margin_left(6.0)
-
-        this.addActor(table, { expand: true, span: 1, align: St.Align.START });
-    },
-
-    setIcon: function(name) {
-        this._icon.icon_name = name;
-    }
-};
-
-function SettingsLauncher(label, keyword, icon, menu) {
-    this._init(label, keyword, icon, menu);
+function SettingsLauncher(label, keyword, icon) {
+    this._init(label, keyword, icon);
 }
 
 SettingsLauncher.prototype = {
-    __proto__: PopupMenu.PopupBaseMenuItem.prototype,
+    __proto__: PopupMenu.PopupIconMenuItem.prototype,
 
-    _init: function (label, keyword, icon, menu) {
-        PopupMenu.PopupBaseMenuItem.prototype._init.call(this, {});
+    _init: function (label, keyword, icon) {
+        PopupMenu.PopupIconMenuItem.prototype._init.call(this, label, icon, St.IconType.SYMBOLIC);
 
-        this._menu = menu;
         this._keyword = keyword;
-        let table = new St.Table({ homogeneous: false,
-                                      reactive: true });
-
-        this.label = new St.Label({ text: label });
-        this._icon = new St.Icon({icon_name: icon, icon_type: St.IconType.SYMBOLIC,
-                                  style_class: 'popup-menu-icon' });
-
-        table.add(this._icon,
-                  {row: 0, col: 0, col_span: 1, x_expand: false, x_align: St.Align.START});
-
-        table.add(this.label,
-                  {row: 0, col: 1, col_span: 1, x_align: St.Align.START});
-
-        this.label.set_margin_left(6.0)
-
-        this.addActor(table, { expand: true, span: 1, align: St.Align.START });
+        this.connect('activate', Lang.bind(this, function() {
+            Util.spawnCommandLine("cinnamon-settings " + this._keyword);
+        }));
     },
-
-    activate: function (event) {
-    	this._menu.actor.hide();
-        Util.spawnCommandLine("cinnamon-settings " + this._keyword);
-        return true;
-    }
-
 };
 
 function populateSettingsMenu(menu, panelId) {
@@ -1051,37 +997,37 @@ function populateSettingsMenu(menu, panelId) {
 
     let panelSettingsSection = new PopupMenu.PopupSubMenuMenuItem(_("Modify panel ..."), true);
 
-    let menuItem = new IconMenuItem(_("Remove panel"), "list-remove");
+    let menuItem = new PopupMenu.PopupIconMenuItem(_("Remove panel"), "list-remove", St.IconType.SYMBOLIC);
     menuItem.activate = Lang.bind(menu, function() {
         Main.panelManager.removePanel(panelId);
     });
     panelSettingsSection.menu.addMenuItem(menuItem);
 
-    menu.addPanelItem = new IconMenuItem(_("Add panel"), "list-add");
+    menu.addPanelItem = new PopupMenu.PopupIconMenuItem(_("Add panel"), "list-add", St.IconType.SYMBOLIC);
     menu.addPanelItem.activate = Lang.bind(menu, function() {
         Main.panelManager.addPanelQuery();
         this.close();
     });
     panelSettingsSection.menu.addMenuItem(menu.addPanelItem);
 
-    menu.movePanelItem = new IconMenuItem(_("Move panel"), "move");
+    menu.movePanelItem = new PopupMenu.PopupIconMenuItem(_("Move panel"), "move", St.IconType.SYMBOLIC);
     menu.movePanelItem.activate = Lang.bind(menu, function() {
         Main.panelManager.movePanelQuery(this.panelId);
         this.close();
     });
     panelSettingsSection.menu.addMenuItem(menu.movePanelItem);
 
-    menu.copyAppletItem = new IconMenuItem(_("Copy applet configuration"), "edit-copy");
+    menu.copyAppletItem = new PopupMenu.PopupIconMenuItem(_("Copy applet configuration"), "edit-copy", St.IconType.SYMBOLIC);
     menu.copyAppletItem.activate = Lang.bind(menu, function() {
         AppletManager.copyAppletConfiguration(this.panelId);
         this.close();
     });
     panelSettingsSection.menu.addMenuItem(menu.copyAppletItem);
 
-    menu.pasteAppletItem = new IconMenuItem(_("Paste applet configuration"), "edit-paste");
+    menu.pasteAppletItem = new PopupMenu.PopupIconMenuItem(_("Paste applet configuration"), "edit-paste", St.IconType.SYMBOLIC);
     menu.pasteAppletItem.activate = Lang.bind(menu, function() {
         let dialog = new ModalDialog.ConfirmDialog(
-                _("Pasting applet configuration will remove all existing applets on this panel. DO you want to continue?") + "\n\n",
+                _("Pasting applet configuration will remove all existing applets on this panel. Do you want to continue?") + "\n\n",
                 Lang.bind(this, function() {
                     AppletManager.pasteAppletConfiguration(this.panelId);
                 }));
@@ -1089,7 +1035,7 @@ function populateSettingsMenu(menu, panelId) {
     });
     panelSettingsSection.menu.addMenuItem(menu.pasteAppletItem);
 
-    menu.clearAppletItem = new IconMenuItem(_("Clear all applets"), "edit-clear-all");
+    menu.clearAppletItem = new PopupMenu.PopupIconMenuItem(_("Clear all applets"), "edit-clear-all", St.IconType.SYMBOLIC);
     menu.clearAppletItem.activate = Lang.bind(menu, function() {
         let dialog = new ModalDialog.ConfirmDialog(
                 _("Are you sure you want to clear all applets on this panel?") + "\n\n",
@@ -1102,46 +1048,6 @@ function populateSettingsMenu(menu, panelId) {
 
 
     menu.addMenuItem(panelSettingsSection);
-
-    // Auto-hide Panel
-    let values = global.settings.get_strv(PANEL_AUTOHIDE_KEY);
-    let property;
-    for (let i = 0; i < values.length; i++){
-        if (values[i].split(":")[0]==panelId){
-            property=values[i].split(":")[1];
-            break;
-        }
-    }
-    if (!property){
-        property = DEFAULT_VALUES[PANEL_AUTOHIDE_KEY];
-        values.push(this.panelId + ":" + property);
-        global.settings.set_strv(PANEL_AUTOHIDE_KEY, values);
-    }
-    let autoHidePanel = new PopupMenu.PopupSwitchMenuItem(_("Auto-hide panel"), property == "true");
-    autoHidePanel.connect('toggled', function(item) {
-        let values = global.settings.get_strv(PANEL_AUTOHIDE_KEY);
-        let property;
-        for (let i = 0; i < values.length; i++){
-            if (values[i].split(":")[0] == panelId){
-                values[i] = panelId + ":" + (item.state ? "true" : "false");
-                break;
-            }
-        }
-        global.settings.set_strv(PANEL_AUTOHIDE_KEY, values);
-    });
-
-    menu.addMenuItem(autoHidePanel);
-    global.settings.connect('changed::' + PANEL_AUTOHIDE_KEY, function() {
-        let values = global.settings.get_strv(PANEL_AUTOHIDE_KEY);
-        let property;
-        for (let i = 0; i < values.length; i++){
-            if (values[i].split(":")[0]==panelId){
-                property=values[i].split(":")[1];
-                break;
-            }
-        }
-        autoHidePanel.setToggleState(property == "true");
-    });
 
     // Panel Edit mode
     let editMode = global.settings.get_boolean("panel-edit-mode");
@@ -1168,16 +1074,16 @@ PanelContextMenu.prototype = {
         this.actor.hide();
         this.panelId = panelId;
 
-        let applet_settings_item = new SettingsLauncher(_("Add applets to the panel"), "applets panel" + panelId, "list-add", this);
+        let applet_settings_item = new SettingsLauncher(_("Add applets to the panel"), "applets panel" + panelId, "list-add");
         this.addMenuItem(applet_settings_item);
 
-        let menuItem = new SettingsLauncher(_("Panel settings"), "panel " + panelId, "emblem-system", this);
+        let menuItem = new SettingsLauncher(_("Panel settings"), "panel " + panelId, "emblem-system");
         this.addMenuItem(menuItem);
 
-        let menuItem = new SettingsLauncher(_("Themes"), "themes", "applications-graphics", this);
+        let menuItem = new SettingsLauncher(_("Themes"), "themes", "applications-graphics");
         this.addMenuItem(menuItem);
 
-        let menuSetting = new SettingsLauncher(_("All settings"), "", "preferences-system", this);
+        let menuSetting = new SettingsLauncher(_("All settings"), "", "preferences-system");
         this.addMenuItem(menuSetting);
 
         populateSettingsMenu(this, panelId);
@@ -1213,7 +1119,6 @@ PanelZoneDNDHandler.prototype = {
         this._panelZone._delegate = this;
         this._dragPlaceholder = null;
         this._dragPlaceholderPos = -1;
-        this._animatingPlaceholdersCount = 0;
     },
 
     handleDragOver: function(source, actor, x, y, time) {
@@ -1236,11 +1141,6 @@ PanelZoneDNDHandler.prototype = {
             if (appletPos != -1 && pos == appletPos) {
                 if (this._dragPlaceholder) {
                     this._dragPlaceholder.animateOutAndDestroy();
-                    this._animatingPlaceholdersCount++;
-                    this._dragPlaceholder.actor.connect('destroy',
-                        Lang.bind(this, function() {
-                            this._animatingPlaceholdersCount--;
-                        }));
                 }
                 this._dragPlaceholder = null;
 
@@ -1302,7 +1202,27 @@ PanelZoneDNDHandler.prototype = {
     }
 }
 
-
+/**
+ * #Panel:
+ * @short_description: A panel object on the monitor
+ *
+ * @panelId (int): the id of the panel
+ * @monitorIndex (int): the index of the monitor containing the panel
+ * @monitor (Meta.Rectangle): the geometry (bounding box) of the monitor
+ * @bottomPosition (boolean): whether the panel is at the bottom of the screen
+ * @actor (Cinnamon.GenericContainer): the actor of the panel
+ * @scaleMode (boolean): whether the applets should scale with the panel
+ *
+ * @_leftBox (St.BoxLayout): the box containing all the applets in the left region
+ * @_centerBox (St.BoxLayout): the box containing all the applets in the center region
+ * @_rightBox (St.BoxLayout): the box containing all the applets in the right region
+ * @_hidden (boolean): whether the panel is currently hidden
+ * @_disabled (boolean): whether the panel is disabled
+ * @_panelEditMode (boolean): whether the panel edit mode is on
+ * @_context_menu (Panel.PanelContextMenu): the context menu of the panel
+ *
+ * This represents a panel on the screen.
+ */
 function Panel(id, monitorIndex, bottomPosition) {
     this._init(id, monitorIndex, bottomPosition);
 }
@@ -1317,13 +1237,10 @@ Panel.prototype = {
     	this._hidden = false;
         this._disabled = false;
         this._panelEditMode = false;
-        this._hidetime = 0;
-        this._hideable = this._getProperty(PANEL_AUTOHIDE_KEY, "b")
-        this._hideTimer = 0;
-        this._showTimer = 0;
+        this._autohideSettings = this._getProperty(PANEL_AUTOHIDE_KEY, "s");
         this._themeFontSize = null;
         this._destroyed = false;
-        this._settingsSignals = [];
+        this._signalManager = new SignalManager.SignalManager(this);
 
         this.scaleMode = false;
 
@@ -1343,7 +1260,7 @@ Panel.prototype = {
         this._centerBox = new St.BoxLayout({ name: 'panelCenter' });
         this.actor.add_actor(this._centerBox);
         this._centerBoxDNDHandler = new PanelZoneDNDHandler(this._centerBox);
-        this._rightBox = new St.BoxLayout({ name: 'panelRight' });
+        this._rightBox = new St.BoxLayout({ name: 'panelRight', align_end: true});
         this.actor.add_actor(this._rightBox);
         this._rightBoxDNDHandler = new PanelZoneDNDHandler(this._rightBox);
 
@@ -1363,46 +1280,36 @@ Panel.prototype = {
         else
             this.actor.add_style_class_name('panel-top')
 
-        /* right */
-        this._status_area_order = [];
-        this._status_area_cinnamon_implementation = {};
-
         this._context_menu = new PanelContextMenu(this, bottomPosition ? St.Side.BOTTOM: St.Side.TOP, id);
         this._menus.addMenu(this._context_menu);
-        
+
         this._context_menu._boxPointer._container.connect('allocate', Lang.bind(this._context_menu._boxPointer, function(actor, box, flags){
                     this._xPosition = this._xpos;
                     this._shiftActor();
         }));
 
+        this._leftPanelBarrier = 0;
+        this._rightPanelBarrier = 0;
+        Main.layoutManager.addChrome(this.actor, { addToWindowgroup: false });
+        this._moveResizePanel();
+        this._onPanelEditModeChanged();
+
         this.actor.connect('button-press-event', Lang.bind(this, this._onButtonPressEvent));
         this.actor.connect('style-changed', Lang.bind(this, this._moveResizePanel));
-        this.actor.connect('parent-set', Lang.bind(this, this._onPanelEditModeChanged));
         this.actor.connect('leave-event', Lang.bind(this, this._leavePanel));
         this.actor.connect('enter-event', Lang.bind(this, this._enterPanel));
         this.actor.connect('get-preferred-width', Lang.bind(this, this._getPreferredWidth));
         this.actor.connect('get-preferred-height', Lang.bind(this, this._getPreferredHeight));
         this.actor.connect('allocate', Lang.bind(this, this._allocate));
 
-        this._settingsSignals.push(global.settings.connect("changed::" + PANEL_AUTOHIDE_KEY, Lang.bind(this, this._processPanelAutoHide)));
-        this._settingsSignals.push(global.settings.connect("changed::" + PANEL_HEIGHT_KEY, Lang.bind(this, this._moveResizePanel)));
-        this._settingsSignals.push(global.settings.connect("changed::" + PANEL_RESIZABLE_KEY, Lang.bind(this, this._moveResizePanel)));
-        this._settingsSignals.push(global.settings.connect("changed::" + PANEL_SCALE_TEXT_ICONS_KEY, Lang.bind(this, this._onScaleTextIconsChanged)));
-        this._settingsSignals.push(global.settings.connect("changed::panel-edit-mode", Lang.bind(this, this._onPanelEditModeChanged)));
-        this._settingsSignals.push(global.settings.connect("changed::no-adjacent-panel-barriers", Lang.bind(this, this._updatePanelBarriers)));
+        this._signalManager.connect(global.settings, "changed::" + PANEL_AUTOHIDE_KEY, this._processPanelAutoHide);
+        this._signalManager.connect(global.settings, "changed::" + PANEL_HEIGHT_KEY, this._moveResizePanel);
+        this._signalManager.connect(global.settings, "changed::" + PANEL_RESIZABLE_KEY, this._moveResizePanel);
+        this._signalManager.connect(global.settings, "changed::" + PANEL_SCALE_TEXT_ICONS_KEY, this._onScaleTextIconsChanged);
+        this._signalManager.connect(global.settings, "changed::panel-edit-mode", this._onPanelEditModeChanged);
+        this._signalManager.connect(global.settings, "changed::no-adjacent-panel-barriers", this._updatePanelBarriers);
 
-        /* Generate panelbox */
-        this._leftPanelBarrier = 0;
-        this._rightPanelBarrier = 0;
-        this.panelBox = new St.BoxLayout({ name: 'panelBox',
-                                           vertical: true });
-        Main.layoutManager.addChrome(this.panelBox, { addToWindowgroup: false });
-        this.panelBox.connect('allocation-changed', Lang.bind(this, this._updatePanelBarriers));
-        this.panelBox.add_actor(this.actor)
-
-        this._moveResizePanel();
     },
-
 
     /**
      * updatePosition:
@@ -1423,6 +1330,11 @@ Panel.prototype = {
                     this._xPosition = this._xpos;
                     this._shiftActor();
         }));
+
+        if (this.bottomPosition)
+            this.actor.set_style_class_name('panel-bottom')
+        else
+            this.actor.set_style_class_name('panel-top')
     },
 
     /**
@@ -1445,12 +1357,8 @@ Panel.prototype = {
         this._leftCorner.actor.destroy();
 
         this.actor.destroy();
-        this.panelBox.destroy();
 
-        let i = this._settingsSignals.length;
-        while (i--) {
-            global.settings.disconnect(this._settingsSignals[i]);
-        }
+        this._signalManager.disconnectAllSignals()
 
         this._menus = null;
         this.monitor = null;
@@ -1466,14 +1374,16 @@ Panel.prototype = {
      * Turns on/off the highlight of the panel
      */
     highlight: function(highlight) {
-        if (highlight)
-            this.actor.add_style_pseudo_class('highlight');
-        else
-            this.actor.remove_style_pseudo_class('highlight');
+        this.actor.change_style_pseudo_class('highlight', highlight);
     },
 
+    /**
+     * isHideable:
+     *
+     * Returns: whether the panel can be hidden (auto-hide or intellihide)
+     */
     isHideable: function() {
-        return this._hideable;
+        return this._autohideSettings != "true";
     },
     
     /**
@@ -1509,44 +1419,53 @@ Panel.prototype = {
         }
     },
 
+    handleDragOver: function(source, actor, x, y, time) {
+        this._enterPanel();
+        if (this._dragShowId > 0)
+            Mainloop.source_remove(this._dragShowId);
+
+        let leaveIfOut = Lang.bind(this, function() {
+            this._dragShowId = 0;
+            let [x, y, whatever] = global.get_pointer();
+            this.actor.sync_hover();
+            if (this.actor.x < x && x < this.actor.x + this.actor.width &&
+                this.actor.y < y && y < this.actor.y + this.actor.height) {
+                return true;
+            } else {
+                this._leavePanel();
+                return false;
+            }
+        });
+
+        this._dragShowId = Mainloop.timeout_add(500, leaveIfOut);
+        return DND.DragMotionResult.NO_DROP;
+    },
+
     _updatePanelBarriers: function() {
         if (this._leftPanelBarrier)
             global.destroy_pointer_barrier(this._leftPanelBarrier);
         if (this._rightPanelBarrier)
             global.destroy_pointer_barrier(this._rightPanelBarrier);
 
-        let noLeft = false;
-        let noRight = false;
         let noBarriers = global.settings.get_boolean("no-adjacent-panel-barriers");
 
-        if (Main.panelManager.getAdjacentPanel(this, Direction.LEFT) != null) {
-            noLeft = noBarriers;
-        }
+        if (this.actor.height) {
+            let panelTop = (this.bottomPosition ? this.monitor.y + this.monitor.height - this.actor.height : this.monitor.y);
+            let panelBottom = (this.bottomPosition ? this.monitor.y + this.monitor.height : this.monitor.y + this.actor.height);
 
-        if (Main.panelManager.getAdjacentPanel(this, Direction.RIGHT) != null) {
-            noRight = noBarriers;
-        }
+            if (!noBarriers) {
+                this._rightPanelBarrier = global.create_pointer_barrier(
+                    this.monitor.x + this.monitor.width - 1, panelTop,
+                    this.monitor.x + this.monitor.width - 1, panelBottom,
+                    4 /* BarrierNegativeX */);
 
-        if (this.panelBox.height) {
-            let panelTop = (this.bottomPosition ? this.monitor.y + this.monitor.height - this.panelBox.height : this.monitor.y);
-            let panelBottom = (this.bottomPosition ? this.monitor.y + this.monitor.height : this.monitor.y + this.panelBox.height);
-
-            if (!noLeft) {
                 this._leftPanelBarrier = global.create_pointer_barrier(
                     this.monitor.x, panelTop,
                     this.monitor.x, panelBottom,
                     1 /* BarrierPositiveX */);
             } else {
-                this._leftPanelBarrier = 0;
-            }
-
-            if (!noRight) {
-                this._rightPanelBarrier = global.create_pointer_barrier(
-                    this.monitor.x + this.monitor.width - 1, panelTop,
-                    this.monitor.x + this.monitor.width - 1, panelBottom,
-                    4 /* BarrierNegativeX */);
-            } else {
                 this._rightPanelBarrier = 0;
+                this._leftPanelBarrier = 0;
             }
         } else {
             this._leftPanelBarrier = 0;
@@ -1556,18 +1475,11 @@ Panel.prototype = {
 
     _onPanelEditModeChanged: function() {
         let old_mode = this._panelEditMode;
-        if (global.settings.get_boolean("panel-edit-mode")) {
-            this._panelEditMode = true;
-            this._leftBox.add_style_pseudo_class('dnd');
-            this._centerBox.add_style_pseudo_class('dnd');
-            this._rightBox.add_style_pseudo_class('dnd');
-        }
-        else {
-            this._panelEditMode = false;
-            this._leftBox.remove_style_pseudo_class('dnd');
-            this._centerBox.remove_style_pseudo_class('dnd');
-            this._rightBox.remove_style_pseudo_class('dnd');
-        }
+
+        this._panelEditMode = global.settings.get_boolean("panel-edit-mode");
+        this._leftBox.change_style_pseudo_class('dnd', this._panelEditMode);
+        this._centerBox.change_style_pseudo_class('dnd', this._panelEditMode);
+        this._rightBox.change_style_pseudo_class('dnd', this._panelEditMode);
 
         if (old_mode != this._panelEditMode) {
             this._processPanelAutoHide();
@@ -1613,24 +1525,54 @@ Panel.prototype = {
         }
         return;
     },
-        
-    _processPanelAutoHide: function() {  
-        this._hideable = this._getProperty(PANEL_AUTOHIDE_KEY, "b") && !this._panelEditMode;
-        // Show a glimpse of the panel irrespective of the new setting,
-        // in order to force a region update.
-        // Techically, this should not be necessary if the function is called
-        // when auto-hide is in effect and is not changing, but experience
-        // shows that not flashing the panels may lead to "phantom panels"
-        // where the panels should be if auto-hide was on.
-        this._hidePanel(true); // force hide
-        this._showPanel();
 
-        if (this._hideable) {
-            this._hidePanel();
-        }
-        Main.layoutManager._chrome.modifyActorParams(this.panelBox, { affectsStruts: !this._hideable });
+    _onFocusChanged: function() {
+        if (global.display.focus_window &&
+            this._focusWindow == global.display.focus_window.get_compositor_private())
+            return;
+
+        this._signalManager.disconnect("position-changed");
+        this._signalManager.disconnect("size-changed");
+
+        if (!global.display.focus_window)
+            return;
+
+        this._focusWindow = global.display.focus_window.get_compositor_private();
+        this._signalManager.connect(this._focusWindow, "position-changed", this._updatePanelVisibility);
+        this._signalManager.connect(this._focusWindow, "size-changed", this._updatePanelVisibility);
+        this._updatePanelVisibility();
     },
 
+    _processPanelAutoHide: function() {  
+        this._autohideSettings = this._getProperty(PANEL_AUTOHIDE_KEY, "s");
+
+        if (this._autohideSettings == "intel") {
+            this._signalManager.connect(global.display, "notify::focus-window", this._onFocusChanged);
+            /* focus-window signal is emitted when the workspace change
+             * animation starts. When the animation ends, we do the position
+             * check again because the windows have moved. We cannot use
+             * _onFocusChanged because _onFocusChanged does nothing when there
+             * is no actual focus change. */
+            this._signalManager.connect(global.window_manager, "switch-workspace-complete", this._updatePanelVisibility);
+            this._onFocusChanged();
+        } else {
+            this._signalManager.disconnect("notify::focus-window");
+            this._signalManager.disconnect("switch-workspace-complete");
+            this._signalManager.disconnect("position-changed");
+            this._signalManager.disconnect("size-changed");
+        }
+
+        this._updatePanelVisibility();
+
+        Main.layoutManager._chrome.modifyActorParams(this.actor, { affectsStruts: this._autohideSettings == "false" });
+    },
+
+    /**
+     * _moveResizePanel:
+     *
+     * Function to update the panel position and size according to settings
+     * values.
+     */
     _moveResizePanel: function() {
         if (this._destroyed) return false;
         this.monitor = global.screen.get_monitor_geometry(this.monitorIndex);
@@ -1663,8 +1605,8 @@ Panel.prototype = {
         this.actor.set_height(panelHeight);
         this._processPanelAutoHide();
 
-        this.panelBox.set_size(this.monitor.width, panelHeight);
-        this.panelBox.set_position(this.monitor.x, this.bottomPosition ? this.monitor.y + this.monitor.height - panelHeight : this.monitor.y);
+        this.actor.set_size(this.monitor.width, panelHeight);
+        this.actor.set_position(this.monitor.x, this.bottomPosition ? this.monitor.y + this.monitor.height - panelHeight : this.monitor.y);
 
         // AppletManager might not be initialized yet
         if (AppletManager.appletsLoaded)
@@ -1709,32 +1651,96 @@ Panel.prototype = {
         let [centerMinWidth, centerNaturalWidth] = this._centerBox.get_preferred_width(-1);
         let [rightMinWidth, rightNaturalWidth] = this._rightBox.get_preferred_width(-1);
 
-        let leftWidth = Math.max(leftNaturalWidth, 25);
-        let centerWidth = centerMinWidth;
-        let rightWidth = Math.max(rightNaturalWidth, 25);
+        let centerBoxOccupied = this._centerBox.get_children().length > 0;
 
-        let space_needed = leftWidth + centerWidth + rightWidth;
-        if (space_needed <= allocWidth) {
-            // If we've more space than we need, expand the center zone
-            let space_left = allocWidth - space_needed;
-            centerWidth = centerWidth + space_left;
-        }
-        else {
-            let space_missing = space_needed - allocWidth;
-            // If there isn't enough space, reduce the size of the largest zone (likely to contain more shrinkable content)
-            if (leftWidth >= centerWidth && leftWidth >= rightWidth) {
-                leftWidth = Math.max(leftWidth - space_missing, leftMinWidth);
-            }
-            else if (centerWidth >= rightWidth) {
-                centerWidth = Math.max(centerWidth - space_missing, centerMinWidth);
-            }
-            else {
-                rightWidth = Math.max(rightWidth - space_missing, rightMinWidth);
-            }
+        /* If panel edit mode, pretend central box is occupied and give it at
+         * least width 25 so that things can be dropped into it */
+        if (this._panelEditMode) {
+            centerBoxOccupied = true;
+            centerMinWidth = Math.max(centerMinWidth, 25);
+            centerNaturalWidth = Math.max(centerNaturalWidth, 25);
         }
 
-        let leftBoundary = leftWidth;
-        let rightBoundary = allocWidth - rightWidth;
+        let totalMinWidth = leftMinWidth + centerMinWidth + rightMinWidth;
+        let totalNaturalWidth = leftNaturalWidth + centerNaturalWidth + rightNaturalWidth;
+
+        let sideMinWidth = Math.max(leftMinWidth, rightMinWidth);
+        let sideNaturalWidth = Math.max(leftNaturalWidth, rightNaturalWidth);
+        let totalCenteredMinWidth = centerMinWidth + 2 * sideMinWidth;
+        let totalCenteredNaturalWidth = centerNaturalWidth + 2 * sideNaturalWidth;
+
+        let leftWidth, rightWidth;
+
+        if (centerBoxOccupied) {
+            if (totalCenteredNaturalWidth < allocWidth) {
+                /* We can give everything their natural width and center will
+                 * still be centered. */
+                leftWidth = (allocWidth - centerNaturalWidth) / 2;
+                rightWidth = leftWidth;
+            } else if (totalCenteredMinWidth < allocWidth) {
+                /* Center can be centered as without shrinking things too much.
+                 * First give everything the minWidth they want, and they
+                 * distribute the remaining space proportional to how much the
+                 * regions want. */
+                let totalRemaining = allocWidth - totalCenteredMinWidth;
+                let totalWant = totalCenteredNaturalWidth - totalCenteredMinWidth;
+
+                leftWidth = sideMinWidth + (sideNaturalWidth - sideMinWidth) / totalWant * totalRemaining;
+                rightWidth = leftWidth;
+            } else if (totalMinWidth < allocWidth) {
+                /* There is enough space for minWidth if we don't care about
+                 * centering. Make center things as center as possible */
+                if (leftMinWidth > rightMinWidth) {
+                    leftWidth = leftMinWidth;
+
+                    if (leftMinWidth + centerNaturalWidth + rightNaturalWidth < allocWidth) {
+                        rightWidth = allocWidth - leftMinWidth - centerNaturalWidth;
+                    } else {
+                        let totalRemaining = allocWidth - totalMinWidth;
+                        let totalWant = centerNaturalWidth + rightNaturalWidth - (centerMinWidth + rightMinWidth);
+
+                        rightWidth = rightMinWidth + (rightNaturalWidth - rightMinWidth) / totalWant * totalRemaining;
+                    }
+                } else {
+                    rightWidth = rightMinWidth;
+
+                    if (rightMinWidth + centerNaturalWidth + leftNaturalWidth < allocWidth) {
+                        leftWidth = allocWidth - rightMinWidth - centerNaturalWidth;
+                    } else {
+                        let totalRemaining = allocWidth - totalMinWidth;
+                        let totalWant = centerNaturalWidth + leftNaturalWidth - (centerMinWidth + leftMinWidth);
+
+                        leftWidth = leftMinWidth + (leftNatulefth - rightMinWidth) / totalWant * totalRemaining;
+                    }
+                }
+            } else {
+                /* Scale everything down according to their minWidth. */
+                leftWidth = leftMinWidth / totalMinWidth * allocWidth;
+                rightWidth = rightMinWidth / totalMinWidth * allocWidth;
+            }
+        } else {
+            if (totalNaturalWidth < allocWidth) {
+                /* Everything's fine. Allocate as usual. */
+                leftWidth = leftNaturalWidth;
+                rightWidth = rightNaturalWidth;
+            } else if (totalMinWidth < allocWidth && !centerBoxOccupied) {
+                /* There is enough space for minWidth but not for naturalWidth.
+                 * Allocate the minWidth and then divide the remaining space
+                 * according to how much more they want. */
+                let totalRemaining = allocWidth - totalMinWidth;
+                let totalWant = totalNaturalWidth - totalMinWidth;
+
+                leftWidth = leftMinWidth + (leftNaturalWidth - leftMinWidth) / totalWant * totalRemaining;
+                rightWidth = rightMinWidth + (rightNaturalWidth - rightMinWidth) / totalWant * totalRemaining;
+            } else {
+                /* Scale everything down according to their minWidth. */
+                leftWidth = leftMinWidth / totalMinWidth * allocWidth;
+                rightWidth = rightMinWidth / totalMinWidth * allocWidth;
+            }
+        }
+
+        let leftBoundary = Math.round(leftWidth);
+        let rightBoundary = Math.round(allocWidth - rightWidth);
         if (this.actor.get_direction() == St.TextDirection.RTL) {
             leftBoundary = allocWidth - leftWidth;
             rightBoundary = rightWidth;
@@ -1753,8 +1759,6 @@ Panel.prototype = {
         }
         this._leftBox.allocate(childBox, flags);
 
-        childBox.y1 = 0;
-        childBox.y2 = allocHeight;
         if (this.actor.get_direction() == St.TextDirection.RTL) {
             childBox.x1 = rightBoundary;
             childBox.x2 = leftBoundary;
@@ -1764,8 +1768,6 @@ Panel.prototype = {
         }
         this._centerBox.allocate(childBox, flags);
 
-        childBox.y1 = 0;
-        childBox.y2 = allocHeight;
         if (this.actor.get_direction() == St.TextDirection.RTL) {
             childBox.x1 = 0;
             childBox.x2 = rightBoundary;
@@ -1790,74 +1792,137 @@ Panel.prototype = {
         childBox.y1 = allocHeight;
         childBox.y2 = allocHeight + cornerHeight;
         this._rightCorner.actor.allocate(childBox, flags);
+
+        this._updatePanelBarriers();
     },
-    
-    _clearTimers: function() {
-        if (this._showTimer) {
-            Mainloop.source_remove(this._showTimer);
-            this._showTimer = 0;
+
+    /**
+     * _updatePanelVisibility:
+     *
+     * Checks whether the panel should show based on the autohide settings and
+     * position of mouse/active window. It then calls the _queueShowHidePanel
+     * function to show or hide the panel as necessary.
+     */
+    _updatePanelVisibility: function() {
+        // false = autohide, true = always show, intel = Intelligent
+        switch (this._autohideSettings) {
+        case "false":
+            this._shouldShow = true;
+            break;
+        case "true":
+            this._shouldShow = this._mouseEntered;
+            break;
+        default:
+            if (this._mouseEntered || !global.display.focus_window ||
+                global.display.focus_window.get_window_type() == Meta.WindowType.DESKTOP) {
+                this._shouldShow = true;
+                break;
+            }
+
+            /* Calculate the y instead of getting the actor y since the
+             * actor might be hidden*/
+            let y = this.bottomPosition ?
+                 this.monitor.y + this.monitor.height - this.actor.height :
+                 this.monitor.y;
+
+            let a = this.actor;
+            let b = global.display.focus_window.get_compositor_private();
+            /* Magic to check whether the panel position overlaps with the
+             * current focused window */
+            this._shouldShow =
+                !(Math.max(a.x, b.x) < Math.min(a.x + a.width, b.x + b.width) &&
+                  Math.max(y, b.y) < Math.min(y + a.height, b.y + b.height));
         }
-        if (this._hideTimer) {
-            Mainloop.source_remove(this._hideTimer);
-            this._hideTimer = 0;
+
+        if (this._panelEditMode)
+            this._shouldShow = true;
+
+        this._queueShowHidePanel();
+    },
+
+    /**
+     * _queueShowHidePanel:
+     *
+     * Makes the panel show or hide after a delay specified by
+     * panels-show-delay and panels-hide-delay.
+     */
+    _queueShowHidePanel: function() {
+        if (this._showHideTimer) {
+            Mainloop.source_remove(this._showHideTimer);
+            this._showHideTimer = 0;
+        }
+
+        /* Use a timeout_add even if delay is 0 to avoid "flashing" of panel.
+         * Otherwise, if, say hideDelay is 0 and showDelay is 1000, when you
+         * move over an applet, leave and enter events are fired consecutively.
+         * Then the leave-event causes the panel hides instantly, causing a
+         * further leave-event (since the mouse actually left the panel), which
+         * clears the showPanel timer, and the panel won't show up again. If a
+         * timeout_add is used for showDelay, the hide timeout will be cancelled
+         * by the coming enter-event, and the panel remains open. */
+        if (this._shouldShow) {
+            let showDelay = this._getProperty(PANEL_SHOW_DELAY_KEY, "i");
+            this._showHideTimer = Mainloop.timeout_add(showDelay, Lang.bind(this, this._showPanel))
+        } else {
+            let hideDelay = this._getProperty(PANEL_HIDE_DELAY_KEY, "i");
+            this._showHideTimer = Mainloop.timeout_add(hideDelay, Lang.bind(this, this._hidePanel))
         }
     },
     
     _enterPanel: function() {
-        this.isMouseOverPanel = true;
-        this._clearTimers();
-        let showDelay = this._getProperty(PANEL_SHOW_DELAY_KEY, "i");
-        if (showDelay > 0) {
-            this._showTimer = Mainloop.timeout_add(showDelay, Lang.bind(this, this._showPanel));
-        }
-        else {
-            this._showPanel();
-        }
+        this._mouseEntered = true;
+        this._updatePanelVisibility();
     },
 
     _leavePanel:function() {
-        this.isMouseOverPanel = false;
-        this._clearTimers();
-        let hideDelay = this._getProperty(PANEL_HIDE_DELAY_KEY, "i");
-        if (hideDelay > 0 && !this._disabled) {
-            this._hideTimer = Mainloop.timeout_add(hideDelay, Lang.bind(this, this._hidePanel));
-        }
-        else {
-            this._hidePanel();
-        }
+        this._mouseEntered = false;
+        this._updatePanelVisibility();
     }, 
 
-    enable: function() {
-        this._disabled = false;
-        this.actor.show();
-        Tweener.addTween(this.actor, {
-            opacity: 255, 
-            time: AUTOHIDE_ANIMATION_TIME, 
-            transition: 'easeOutQuad'
-        });
-    }, 
-    
+    /**
+     * disable:
+     *
+     * Disables the panel by settings the opacity to 0 and hides if autohide is
+     * enable. The actor is then hidden after the animation.
+     */
     disable: function() {
         this._disabled = true;
         this._leavePanel();
         Tweener.addTween(this.actor, {
-            opacity: 0, 
-            time: AUTOHIDE_ANIMATION_TIME, 
-            transition: 'easeOutQuad', 
+            opacity: 0,
+            time: AUTOHIDE_ANIMATION_TIME,
+            transition: 'easeOutQuad',
             onComplete: this.actor.hide
         });
     }, 
-    
+
+    /**
+     * enable:
+     *
+     * Reverses the effects of the disable function.
+     */
+    enable: function() {
+        this._disabled = false;
+        this.actor.show();
+        Tweener.addTween(this.actor, {
+            opacity: 255,
+            time: AUTOHIDE_ANIMATION_TIME,
+            transition: 'easeOutQuad'
+        });
+    },
+
+    /**
+     * _showPanel:
+     *
+     * A function to force the panel to show. This has no effect if the panel
+     * is disabled.
+     */
     _showPanel: function() {
-        this._clearTimers();
+        this._showHideTimer = 0;
 
         if (this._disabled) return;
 
         if (!this._hidden) return;
-
-        if (Main.lookingGlass != null && Main.lookingGlass._open) {
-            return;
-        }
 
         // Force the panel to be on top (hack to correct issues when switching workspace)
         Main.layoutManager._windowsRestacked();
@@ -1874,7 +1939,11 @@ Panel.prototype = {
         Tweener.addTween(this._leftCorner.actor, params);
         Tweener.addTween(this._rightCorner.actor, params);
 
-        Tweener.addTween(this.actor.get_parent(),
+        this._leftBox.show();
+        this._centerBox.show();
+        this._rightBox.show();
+
+        Tweener.addTween(this.actor,
                         { y: y,
                         time: animationTime,
                         transition: 'easeOutQuad',
@@ -1882,13 +1951,10 @@ Panel.prototype = {
                             // Force the layout manager to update the input region
                             Main.layoutManager._chrome.updateRegions()
 
-                            let height = Math.abs(this.actor.get_parent().y - origY);
+                            let height = Math.abs(this.actor.y - origY);
                             let y = bottomPosition? 0 : this.actor.height - height;
 
                             this.actor.set_clip(0, y, this.monitor.width, height);
-                        }),
-                        onComplete: Lang.bind(this, function() {
-                            this.actor.remove_clip();
                         }),
                         onUpdateParams: [this.bottomPosition ? this.monitor.y + this.monitor.height : this.monitor.y - height, this.bottomPosition]
                         });
@@ -1905,10 +1971,19 @@ Panel.prototype = {
         this._hidden = false;
     },
 
+    /**
+     * _hidePanel:
+     * @force (boolean): whether or not to force the hide.
+     *
+     * This hides the panel unless this._shouldShow is false. This behaviour is
+     * overridden if the @force argument is set to true. However, the panel
+     * will always not be hidden if a menu is open, regardless of the value of
+     * @force.
+     */
     _hidePanel: function(force) {
-        this._clearTimers();
+        this._showHideTimer = 0;
 
-        if ((!this._hideable && !force) || global.menuStackLength > 0 || this.isMouseOverPanel) return;
+        if ((this._shouldShow && !force) || global.menuStackLength > 0) return;
 
         // Force the panel to be on top (hack to correct issues when switching workspace)
         Main.layoutManager._windowsRestacked();
@@ -1917,7 +1992,7 @@ Panel.prototype = {
         let animationTime = AUTOHIDE_ANIMATION_TIME;
         let y = this.bottomPosition ? this.monitor.y + this.monitor.height - 1 : this.monitor.y - height + 1;
         
-        Tweener.addTween(this.actor.get_parent(), { 
+        Tweener.addTween(this.actor, {
             y: y,
             time: animationTime,
             transition: 'easeOutQuad',
@@ -1925,13 +2000,15 @@ Panel.prototype = {
                 // Force the layout manager to update the input region
                 Main.layoutManager._chrome.updateRegions()
 
-                let height = Math.abs(this.actor.get_parent().y - targetY) + 1;
+                let height = Math.abs(this.actor.y - targetY) + 1;
                 let y = bottomPosition ? 0 : this.actor.height - height;
 
                 this.actor.set_clip(0, y, this.monitor.width, height);
             }),
             onComplete: Lang.bind(this, function() {
-                this.actor.remove_clip();
+                this._leftBox.hide();
+                this._centerBox.hide();
+                this._rightBox.hide();
             }),
             onUpdateParams: [y, this.bottomPosition]
         });
@@ -1955,5 +2032,4 @@ Panel.prototype = {
 
         this._hidden = true;
     },
-
 };

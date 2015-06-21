@@ -294,15 +294,13 @@ function addAppletToPanels(extension, appletDefinition) {
             appletDefinition.location.remove_actor(appletsToMove[i]);
         }
 
-        if (appletDefinition.center) {
-            appletDefinition.location.add(applet.actor, {x_align: St.Align.CENTER_SPECIAL});
-        } else {
-            appletDefinition.location.add(applet.actor);
-        }
+        appletDefinition.location.add(applet.actor);
 
         applet._panelLocation = appletDefinition.location;
         for (let i=0; i<appletsToMove.length; i++) {
+            let hidden = !appletsToMove[i].visible;
             appletDefinition.location.add(appletsToMove[i]);
+            if (hidden) appletsToMove[i].hide();
         }
         
         if(!extension._loadedDefinitions) {
@@ -367,7 +365,7 @@ function createApplet(extension, appletDefinition) {
     return(applet);
 }
 
-function _removeAppletFromPanel(obj, event, keepMenu, uuid, applet_id) {
+function _removeAppletFromPanel(uuid, applet_id) {
     let enabledApplets = enabledAppletDefinitions.raw;
     for (let i=0; i<enabledApplets.length; i++) {
         let appletDefinition = getAppletDefinition(enabledApplets[i]);
@@ -537,8 +535,12 @@ function updateAppletsOnPanel (panel) {
             definition.orientation = orientation;
 
             if (appletObj[applet_id]) {
-                appletObj[applet_id].setPanelHeight(height);
-                appletObj[applet_id].setOrientation(orientation);
+                try {
+                    appletObj[applet_id].setPanelHeight(height);
+                    appletObj[applet_id].setOrientation(orientation);
+                } catch (e) {
+                    global.logError("Error during setPanelHeight() and setOrientation() call on applet: " + definition.uuid + "/" + applet_id, e);
+                }
             }
         }
     }
@@ -595,6 +597,11 @@ function pasteAppletConfiguration(panelId) {
     let nextId = global.settings.get_int("next-applet-id");
     for (let i = 0; i < len; i++) {
         let max = Extension.get_max_instances(clipboard[i].uuid);
+        if (max == -1) {
+            raw.push("panel" + panelId + ":" + clipboard[i].location_label + ":" + clipboard[i].order + ":" + clipboard[i].uuid + ":" + nextId);
+            nextId ++;
+            continue;
+        }
         let curr = enabledAppletDefinitions.uuidMap[clipboard[i].uuid];
         let count = curr.length;
         if (count >= max) { // If we have more applets that allowed, we see if we any of them are removed above

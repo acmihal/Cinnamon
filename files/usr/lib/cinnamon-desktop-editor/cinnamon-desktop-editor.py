@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python2
 
 import sys
 import os
@@ -53,11 +53,11 @@ def try_icon_name(filename):
     return parts[3]
 
 def get_icon_string(image):
-    filename = image.props.file
+    filename = image._file
     if filename is not None:
         return try_icon_name(filename)
 
-    return image.props.icon_name
+    return image._icon_name
 
 def strip_extensions(icon):
     if icon.endswith(EXTENSIONS):
@@ -67,9 +67,13 @@ def strip_extensions(icon):
 
 def set_icon_string(image, icon):
     if GLib.path_is_absolute(icon):
-        image.props.file = icon
+        image._file = icon
+        pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_size(icon, 64, 64)
+        if pixbuf is not None:
+            image.set_from_pixbuf(pixbuf)
     else:
-        image.props.icon_name = strip_extensions(icon)
+        image._icon_name = strip_extensions(icon)
+        image.set_from_icon_name (strip_extensions (icon), Gtk.IconSize.BUTTON)
 
 def ask(msg):
     dialog = Gtk.MessageDialog(None,
@@ -102,14 +106,15 @@ class IconPicker(object):
         chooser.add_shortcut_folder("/usr/share/pixmaps")
         chooser.add_shortcut_folder("/usr/share/icons")
         fn = get_icon_string(self.image)
-        if GLib.path_is_absolute(fn):
-            chooser.set_filename(fn)
-        else:
-            theme = Gtk.IconTheme.get_default()
-            icon_info = theme.lookup_icon(fn, 64, 0)
-            icon_info_fn = icon_info.get_filename() if icon_info != None else None
-            if icon_info_fn:
-                chooser.set_filename(icon_info_fn)
+        if fn:
+            if GLib.path_is_absolute(fn):
+                chooser.set_filename(fn)
+            else:
+                theme = Gtk.IconTheme.get_default()
+                icon_info = theme.lookup_icon(fn, 64, 0)
+                icon_info_fn = icon_info.get_filename() if icon_info != None else None
+                if icon_info_fn:
+                    chooser.set_filename(icon_info_fn)
         filter = Gtk.FileFilter();
         filter.add_pixbuf_formats ();
         chooser.set_filter(filter);
@@ -120,7 +125,7 @@ class IconPicker(object):
 
         response = chooser.run()
         if response == Gtk.ResponseType.ACCEPT:
-            self.image.props.file = chooser.get_filename()
+            set_icon_string (self.image, chooser.get_filename())
         chooser.destroy()
 
     def update_icon_preview_cb(self, chooser, preview):
@@ -146,6 +151,10 @@ class ItemEditor(object):
 
         self.dialog.connect('response', self.on_response)
 
+        icon = self.builder.get_object('icon-image')
+        icon._file = None
+        icon._icon_name = None
+
         self.build_ui()
 
         self.item_path = item_path
@@ -163,20 +172,20 @@ class ItemEditor(object):
         if name_valid:
             self.builder.get_object('name-entry').set_icon_from_icon_name(Gtk.EntryIconPosition.SECONDARY, 'ok')
             self.builder.get_object('name-entry').set_icon_tooltip_text(Gtk.EntryIconPosition.SECONDARY,
-                                                                        _("Valid"))
+                                                                        _("Valid name"))
         else:
             self.builder.get_object('name-entry').set_icon_from_icon_name(Gtk.EntryIconPosition.SECONDARY, 'stop')
             self.builder.get_object('name-entry').set_icon_tooltip_text(Gtk.EntryIconPosition.SECONDARY,
-                                                                        _("Name cannot be blank."))
+                                                                        _("The name cannot be empty."))
 
         if exec_valid:
             self.builder.get_object('exec-entry').set_icon_from_icon_name(Gtk.EntryIconPosition.SECONDARY, 'ok')
             self.builder.get_object('exec-entry').set_icon_tooltip_text(Gtk.EntryIconPosition.SECONDARY,
-                                                                        _("Valid"))
+                                                                        _("Valid executable"))
         else:
             self.builder.get_object('exec-entry').set_icon_from_icon_name(Gtk.EntryIconPosition.SECONDARY, 'stop')
             self.builder.get_object('exec-entry').set_icon_tooltip_text(Gtk.EntryIconPosition.SECONDARY,
-                                                                        _("Cannot be empty.  Spaces in filenames must be escaped with backslash (\\).\nNot a valid executable line."))
+                                                                        _("The executable is not valid. It cannot be empty and spaces in the path must be escaped with backslash (\\)."))
 
         self.builder.get_object('ok').set_sensitive(name_valid and exec_valid)
 

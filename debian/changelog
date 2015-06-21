@@ -1,3 +1,162 @@
+cinnamon (2.6.8) rafaela; urgency=medium
+
+  [ glebihan ]
+  * Fix typo in doc
+
+  [ Dexter Chua ]
+  * windowManager.js: fix typo; fixes #4253
+  * panel.js: fix panel autohide glitch
+  * applet.js: don't use deprecated MenuItem
+
+  [ Clement Lefebvre ]
+  * Revert "Menu applet: Removed context menu on recent items (overkill and we're really struggling with performance at startup)"
+  * Power applet: Fixed panel icon not getting refreshed after falling back to brightness icon (after a suspend/resume for instance)
+  * Power Settings: Added missing "self" in front of function
+  * Background settings: Don't fail when locale isn't as expected (fixes "LC_ALL=C cinnamon-settings backgrounds")
+
+  [ zyisrad ]
+  * Display Volume OSD on primary monitor correctly
+
+  [ Michael Webster ]
+  * windowManager.js: Fix window dimming behavior for attached modal dialogs.
+  * menu applet: clean up panel icon section - having no icon is a valid option, and it wasn't working.
+  * cs_startup: Let double-clicking entry open the edit dialog.
+
+  [ David Gasquez ]
+  * Fix typo
+
+  [ leigh123linux ]
+  * remove empty tooltip
+
+ -- Clement Lefebvre <root@linuxmint.com>  Sun, 14 Jun 2015 13:18:44 +0200
+
+cinnamon (2.6.7) rafaela; urgency=medium
+
+  [ Michael Webster ]
+  * Make cinnamon a proper registered client with cinnamon-session.  This lets us kill it on command.  Otherwise, it lasts longer than c-s-d does (which is also a registered client) and we get strange icon/theme issues during logout, once xsettings dies.
+
+  [ Clement Lefebvre ]
+  * Renamed Screen Locker settings -> Screensaver and regenerated module desktop files
+  * Updated desktop files
+  * Make sure to refresh menu/panel-launchers at least once (when the Cinnamon icon theme is the same as the GTK one we don't get any icon-theme-change from St)
+  * By default, allow Cinnamon to scale panel text and icons according to the panel heights
+
+ -- Clement Lefebvre <root@linuxmint.com>  Tue, 02 Jun 2015 12:39:58 +0200
+
+cinnamon (2.6.6) rafaela; urgency=medium
+
+  * Revert "Menu/Panel Launchers applets: Don't listen to St directly, refresh when icon theme or active display scale is changed" (Fixes race condition causing gnome icon theme in menu/panel-launchers at login)
+  * BackgroundManager: After 60 seconds, apply gnome bg changes blindly (fixes case where Firefox->set as wallpaper saves a new picture using the same path as before)
+
+ -- Clement Lefebvre <root@linuxmint.com>  Sun, 31 May 2015 18:59:15 +0200
+
+cinnamon (2.6.5) rafaela; urgency=medium
+
+  [ Clement Lefebvre ]
+  * Added cinnamon-killer-daemon to restart nemo/CSD/cinnamon via keyboard shortcut
+
+ -- Clement Lefebvre <root@linuxmint.com>  Sat, 30 May 2015 13:22:51 +0200
+
+cinnamon (2.6.4) rafaela; urgency=medium
+
+  [ mtwebster ]
+  * cinnamon-desktop-editor: Don't panic when an existing .desktop file doesn't have an icon defined.
+
+  [ Stephen Collins ]
+  * Make sure notification applet always stays hidden when it's supposed to
+
+  [ Clement Lefebvre ]
+  * Network applet: Fixed default IPV6 device being considered as important as default IPV4 one
+
+ -- Clement Lefebvre <root@linuxmint.com>  Fri, 29 May 2015 10:21:05 +0200
+
+cinnamon (2.6.3) rafaela; urgency=medium
+
+  [ Clement Lefebvre ]
+  * Power settings: Don't rely on output.get_backlight_min|max() to show brightness controls as it's not reliable with all hardware. Try to get backlight() info directly to see if it's supported instead.
+  * Theme settings: Fixed regression caused by gettext fix ;)
+  * Power settings: Don't show "When the battery is critically low" option with upower 1.0 (it no longer supports that)
+  * Power settings: Don't use variables that don't exist (in UPS handling)
+  * Calendar applet: Refresh view when show-week-numbers setting is changed
+  * Network applet: Properly detect active VPN connection at session start when updating the panel icon
+  * On-Screen keyboard: Affect Struts
+  * On-Screen keyboard: Removed transparent background in default theme.
+  * Sound applet: Only read position for seek-supported players, only support seek when playback rate is 1.0, don't support seek for Totem/GNOME-MPlayer/Pithos (either getting or setting the position isn't fully functional), only update the position timer once every second
+  * Systray applet: Factorize icon resize code, removed special cases (we know they don't work for pidgin and thunderbird)
+  * Systray applet: force natural icon sizes for known buggy icons (pidgin, thunderbird)
+  * Keyboard settings: Renamed horizontal/vertical maximization options
+
+  [ Dexter Chua ]
+  * cinnamon-slideshow.py: fix crash when file change
+  * expo.js: don't respond to scrolls when animating
+  * docs: Split out tutorials
+  * cs_general.py: Sync GNOME HiDPI settings
+  * Fix panel launcher dnd
+  * cinnamon-settings: be compatible with old gi
+  *  cs_screensaver.py: use gtk_container_foreach instead of gtk_container_forall
+  * docs: Fix doc image not showing
+  * docs: Fix missing syntax highlight
+  * cs_panel.py: better protection against broken panel config
+
+  [ Gwendal Le Bihan ]
+  * Don't show stack switcher on applet configuration page
+  * Follow date format setting in notification applet
+
+  [ Didenko Vladimir ]
+  * Load default icon if icon theme doesn't have application icon
+
+  [ Michael Webster ]
+  * js/docInfo.js: don't make a thumbnail factory (it never gets used)
+  * cinnamon-settings: invert mouse sensitivity setting so it makes sense, eliminate rubber-banding of GSettingsRange by restricting int setting types to whole number adjustments in the slider.
+  * cs_privacy: replace broken unbind() - take advantage of the behavior that a new binding will overwrite a previous one on the same object property.
+  * Add image for default screensaver preview.
+  * cs_screensaver.py: bring the currently selected screensaver row into view when the panel is displayed.
+  * menu applet: when refreshing happens, apps, recent and places need to end up in the same order as before.  Also, since we empty the whole container during an app refresh, we need to rebuild recent and places.  When places change, we need to refresh recent also (to maintain order).
+  * SettingsWidgets: display the correct number of SpinButton digits depending on the step value. (fixes issue with font scale spinner)
+  * cs_panel: don't connect to settings until the page has been constructed. Don't crash and burn if cinnamon isn't running.
+  * cs_panel: don't crash when there aren't any panels
+
+  [ JosephMcc ]
+  * osd: fix the media keys osd not showing on top of full screen windows
+  * remove double '/' from paths
+  * allow disabling of pointer barriers on all panels
+
+  [ pixunil ]
+  * Added missing method to ExtensionSidePage class, which blocked the update of the indicator of the active theme
+
+ -- Clement Lefebvre <root@linuxmint.com>  Wed, 27 May 2015 10:30:20 +0200
+
+cinnamon (2.6.2) rafaela; urgency=medium
+
+  [ Dexter Chua ]
+  * docs: Move tutorial index to tutorials/ folder
+  * docs: include image used in source
+
+  [ Clement Lefebvre ]
+  * Gettext fixes
+  * Gettext fix: "Lock Screen" is ambiguous in English, we decided in 2.4 it would be translated as the action, whereas "Screen Locker" would be the noun.
+  * Gettext fix: Can't use adjectives without nouns
+
+ -- Clement Lefebvre <root@linuxmint.com>  Thu, 21 May 2015 12:41:46 +0200
+
+cinnamon (2.6.1) rafaela; urgency=medium
+
+  * cs_screensaver.py: ellipsize description when necessary
+
+ -- Clement Lefebvre <root@linuxmint.com>  Wed, 20 May 2015 09:28:56 +0200
+
+cinnamon (2.6.0) rafaela; urgency=medium
+
+  * 2.6.0 
+
+ -- Clement Lefebvre <root@linuxmint.com>  Tue, 19 May 2015 17:50:50 +0200
+
+cinnamon (2.5.0) unstable; urgency=medium
+
+  * bump for development
+
+ -- Michael Webster <miketwebster@gmail.com>  Sat, 11 Apr 2015 08:37:01 -0400
+
 cinnamon (2.4.6) rebecca; urgency=medium
 
   * Settings: Fix occasional GTK-Warning and blank menu entry in the terminal selection, some comments

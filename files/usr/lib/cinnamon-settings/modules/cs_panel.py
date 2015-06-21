@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python2
 import sys
 import dbus
 from gi.repository import GLib, Gtk, Gdk
@@ -9,121 +9,158 @@ class Monitor:
         self.top = -1
         self.bottom = -1
 
+class PanelSettingsPage(SettingsPage):
+    def __init__(self, panel_id):
+        super(PanelSettingsPage, self).__init__()
+        self.set_margin_top(0)
+        self.set_margin_bottom(0)
+        self.widgets = []
+        self.panel_id = panel_id
+
+        section = SettingsBox(_("Settings"))
+        self.add(section)
+
+        options = [["true", _("Auto hide panel")], ["false", _("Always show panel")], ["intel", _("Intelligently hide panel")]]
+        widget = PanelComboBox(_("Auto-hide panel"), "org.cinnamon", "panels-autohide", self.panel_id, options)
+        section.add_row(widget)
+        self.widgets.append(widget)
+
+        widget = PanelSpinButton(_("Show delay"), "org.cinnamon", "panels-show-delay", self.panel_id, _("milliseconds"), 0, 2000, 50, 200, "org.cinnamon/panels-autohide")
+        section.add_reveal_row(widget)
+        self.widgets.append(widget)
+
+        widget = PanelSpinButton(_("Hide delay"), "org.cinnamon", "panels-hide-delay", self.panel_id, _("milliseconds"), 0, 2000, 50, 200, "org.cinnamon/panels-autohide")
+        section.add_reveal_row(widget)
+        self.widgets.append(widget)
+
+        widget = PanelSwitch(_("Use customized panel size (otherwise it's defined by the theme)"), "org.cinnamon", "panels-resizable", self.panel_id)
+        section.add_row(widget)
+        self.widgets.append(widget)
+
+        widget = PanelSwitch(_("Allow Cinnamon to scale panel text and icons according to the panel heights"), "org.cinnamon", "panels-scale-text-icons", self.panel_id, "org.cinnamon/panels-resizable")
+        section.add_reveal_row(widget)
+        self.widgets.append(widget)
+
+        widget = PanelRange(_("Panel height:"), "org.cinnamon", "panels-height", self.panel_id, _("Smaller"), _("Larger"), mini=20, maxi=50, dep_key="org.cinnamon/panels-resizable")
+        widget.add_mark(25.0, Gtk.PositionType.TOP, None)
+        section.add_reveal_row(widget)
+        self.widgets.append(widget)
+
+    def set_panel_id(self, panel_id):
+        self.panel_id = panel_id
+        for widget in self.widgets:
+            widget.set_panel_id(self.panel_id)
+
 class Module:
+    name = "panel"
+    category = "prefs"
+    comment = _("Manage Cinnamon panel settings")
+
     def __init__(self, content_box):
         keywords = _("panel, height, bottom, top, autohide, size, layout")
-        sidePage = SidePage(_("Panel"), "cs-panel", keywords, content_box, 450, module=self)
-        self.sidePage = sidePage
-        self.name = "panel"
-        self.category = "prefs"
-        self.comment = _("Manage Cinnamon panel settings")
-
-        self.settings = Gio.Settings.new("org.cinnamon");
-        self.settings.connect("changed::panels-enabled", self.on_panel_list_changed)
-        self.proxy = dbus.SessionBus().get_object("org.Cinnamon", "/org/Cinnamon")
-
-        self.widgets = []
-        self.panel_id = None
-        if len(sys.argv) > 2:
-            if sys.argv[1] == "panel":
-                self.panel_id = int(sys.argv[2])
-        else:
-            self.panel_id = -1
+        self.sidePage = SidePage(_("Panel"), "cs-panel", keywords, content_box, module=self)
 
     def on_module_selected(self):
         if not self.loaded:
             print "Loading Panel module"
 
+            self.settings = Gio.Settings.new("org.cinnamon");
+
+            try:
+                if len(sys.argv) > 2 and sys.argv[1] == "panel":
+                    self.panel_id = int(sys.argv[2])
+                else:
+                    self.panel_id = int(self.settings.get_strv("panels-enabled")[0].split(":")[0])
+            except:
+                self.panel_id = -1
+
             self.monitor_layout = []
             self.panels = []
-
-            self.panel_bg = SectionBg()
-            self.sidePage.add_widget(self.panel_bg)
-            vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-            self.panel_bg.add(vbox)
-
-            self.panel_content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
 
             self.previous_button = Gtk.Button(_("Previous panel"))
             self.next_button = Gtk.Button(_("Next panel"))
 
-            buttonbox = Gtk.HBox(margin=6)
-
-            buttonbox.pack_start(self.previous_button, False, False, 2)
-            buttonbox.pack_start(self.next_button, False, False, 2)
-
-            self.panel_content.add(buttonbox)
-
-            section = Section(_("Auto Hide Options"))
-
-            widget = PanelCheckButton(_("Auto-hide panel"), "org.cinnamon", "panels-autohide", None, self.panel_id)
-            section.add(widget)
-            self.widgets.append(widget)
-
-            widget = PanelSpinButton(_("Show delay"), "org.cinnamon", "panels-show-delay", "org.cinnamon/panels-autohide", 0, 2000, 50, 200, _("milliseconds"), self.panel_id)
-            section.add_indented(widget)
-            self.widgets.append(widget)
-            
-            widget = PanelSpinButton(_("Hide delay"), "org.cinnamon", "panels-hide-delay", "org.cinnamon/panels-autohide", 0, 2000, 50, 200, _("milliseconds"), self.panel_id)
-            section.add_indented(widget)
-            self.widgets.append(widget)
-            self.panel_content.add(section)
-
-            self.panel_content.add(Gtk.Separator.new(Gtk.Orientation.HORIZONTAL))
-
-            section = Section(_("Size Options"))
-
-            widget = PanelCheckButton(_("Use customized panel size (otherwise it's defined by the theme)"), "org.cinnamon", "panels-resizable", None, self.panel_id)
-            section.add(widget)
-            self.widgets.append(widget)
-
-            widget = PanelCheckButton(_("Allow Cinnamon to scale panel text and icons according to the panel heights"), "org.cinnamon", "panels-scale-text-icons", "org.cinnamon/panels-resizable", self.panel_id)
-            section.add_indented(widget)
-            self.widgets.append(widget)
-
-            widget = PanelIntRange(_("Panel height:"), _("Smaller"), _("Larger"), 20, 50, False, False, "org.cinnamon", "panels-height", "org.cinnamon/panels-resizable", self.panel_id, adjustment_step = 1.0)
-            widget.add_mark(25.0, Gtk.PositionType.TOP, None)
-            section.add_indented_expand(widget)
-            self.widgets.append(widget)
-            self.panel_content.add(section)
-            vbox.add(self.panel_content)
-
-
-            bg = SectionBg()
-            self.sidePage.add_widget(bg)
-
-            section = Section(_("General Panel Options"))
-            bg.add(section)
-
-            hbox = Gtk.Box(Gtk.Orientation.HORIZONTAL)
-            section.add(hbox)
-
-            self.add_panel_button = Gtk.Button(label=_("Add new panel"))
-
-            hbox.pack_start(self.add_panel_button, False, False, 2)
-            toggle_button = Gtk.ToggleButton(label=_("Panel edit mode"))
-
-            self.settings.bind("panel-edit-mode", toggle_button, "active", Gio.SettingsBindFlags.DEFAULT)
-            hbox.pack_start(toggle_button, False, False, 2)
-
-            section.add(GSettingsCheckButton(_("Allow the pointer to pass through the edges of adjacent panels"), "org.cinnamon", "no-adjacent-panel-barriers", None))
-
-            self.add_panel_button.connect("clicked", self.on_add_panel)
+            controller = SettingsWidget()
+            controller.fill_row()
+            controller.pack_start(self.previous_button, False, False, 0)
+            controller.pack_end(self.next_button, False, False, 0)
             self.previous_button.connect("clicked", self.on_previous_panel)
             self.next_button.connect("clicked", self.on_next_panel)
 
-            self.panel_content.connect("map", self.on_panel_list_changed)
-            self.panel_content.connect("unmap", self.restore_panels)
-            self.panel_content.connect("destroy", self.restore_panels)
+            self.revealer = SettingsRevealer()
 
-        self.on_panel_list_changed("org.cinnamon", "panels-enabled")
+            page = SettingsPage()
+            page.add(controller)
+            page.set_margin_bottom(0)
+            self.revealer.add(page)
+            self.sidePage.add_widget(self.revealer)
+
+            self.config_stack = Gtk.Stack()
+            self.config_stack.set_transition_duration(150)
+            self.revealer.add(self.config_stack)
+
+            self.pages = [PanelSettingsPage(self.panel_id) for i in range(2)]
+            self.config_stack.add_named(self.pages[0], "0")
+            self.config_stack.add_named(self.pages[1], "1")
+
+            self.current_visible = self.pages[0]
+            self.pending_visible = self.pages[1]
+            self.config_stack.set_visible_child(self.current_visible)
+            self.current_visible.set_panel_id(self.panel_id)
+
+            page = SettingsPage()
+            self.sidePage.add_widget(page)
+            section = page.add_section(_("General Panel Options"))
+
+            buttons = SettingsWidget()
+            self.add_panel_button = Gtk.Button(label=_("Add new panel"))
+
+            buttons.pack_start(self.add_panel_button, False, False, 2)
+            toggle_button = Gtk.ToggleButton(label=_("Panel edit mode"))
+
+            self.settings.bind("panel-edit-mode", toggle_button, "active", Gio.SettingsBindFlags.DEFAULT)
+            buttons.pack_end(toggle_button, False, False, 2)
+            section.add_row(buttons)
+
+            section.add_row(GSettingsSwitch(_("Allow the pointer to pass through the edges of panels"), "org.cinnamon", "no-adjacent-panel-barriers"))
+
+            self.add_panel_button.set_sensitive(False)
+
+            self.revealer.connect("map", self.on_panel_list_changed)
+            self.settings.connect("changed::panels-enabled", self.on_panel_list_changed)
+
+            self.proxy = None
+
+            try:
+                Gio.DBusProxy.new_for_bus(Gio.BusType.SESSION, Gio.DBusProxyFlags.NONE, None,
+                                          "org.Cinnamon", "/org/Cinnamon", "org.Cinnamon", None, self._on_proxy_ready, None)
+            except dbus.exceptions.DBusException as e:
+                print(e)
+                self.proxy = None
+
+        self.on_panel_list_changed()
+
+    def _on_proxy_ready (self, object, result, data=None):
+        self.proxy = Gio.DBusProxy.new_for_bus_finish(result)
+
+        if not self.proxy.get_name_owner():
+            self.proxy = None
+
+        if self.proxy:
+            self.revealer.connect("unmap", self.restore_panels)
+            self.revealer.connect("destroy", self.restore_panels)
+
+            self.add_panel_button.connect("clicked", self.on_add_panel)
+            self.add_panel_button.set_sensitive(True)
+
+            self.proxy.highlightPanel('(ib)', self.panel_id, True)
 
     def on_add_panel(self, widget):
-        self.proxy.addPanelQuery(dbus_interface='org.Cinnamon')
+        self.proxy.addPanelQuery()
 
     def on_previous_panel(self, widget):
-        if self.panel_id:
-            self.proxy.highlightPanel(int(self.panel_id), False, dbus_interface='org.Cinnamon')
+        if self.panel_id and self.proxy:
+            self.proxy.highlightPanel('(ib)', self.panel_id, False)
 
         current = self.panels.index(self.panel_id)
 
@@ -132,14 +169,18 @@ class Module:
         else:
             self.panel_id = self.panels[len(self.panels) - 1]
 
-        if self.panel_id:
-            self.proxy.highlightPanel(int(self.panel_id), True, dbus_interface='org.Cinnamon')
-            for widget in self.widgets:
-                widget.set_panel_id(self.panel_id)
+        self.config_stack.set_transition_type(Gtk.StackTransitionType.SLIDE_RIGHT)
+
+        if self.proxy:
+            self.proxy.highlightPanel('(ib)', self.panel_id, True)
+        self.pending_visible.set_panel_id(self.panel_id)
+
+        self.pending_visible, self.current_visible = self.current_visible, self.pending_visible
+        self.config_stack.set_visible_child(self.current_visible)
 
     def on_next_panel(self, widget):
-        if self.panel_id:
-            self.proxy.highlightPanel(int(self.panel_id), False, dbus_interface='org.Cinnamon')
+        if self.panel_id and self.proxy:
+            self.proxy.highlightPanel('(ib)', self.panel_id, False)
 
         current = self.panels.index(self.panel_id)
 
@@ -148,12 +189,16 @@ class Module:
         else:
             self.panel_id = self.panels[0]
 
-        if self.panel_id:
-            self.proxy.highlightPanel(int(self.panel_id), True, dbus_interface='org.Cinnamon')
-            for widget in self.widgets:
-                widget.set_panel_id(self.panel_id)
+        self.config_stack.set_transition_type(Gtk.StackTransitionType.SLIDE_LEFT)
 
-    def on_panel_list_changed(self, arg1=None, arg2=None):
+        if self.proxy:
+            self.proxy.highlightPanel('(ib)', self.panel_id, True)
+        self.pending_visible.set_panel_id(self.panel_id)
+
+        self.pending_visible, self.current_visible = self.current_visible, self.pending_visible
+        self.config_stack.set_visible_child(self.current_visible)
+
+    def on_panel_list_changed(self, *args):
         panels = self.settings.get_strv("panels-enabled")
 
         n_mons = Gdk.Screen.get_default().get_n_monitors()
@@ -161,10 +206,9 @@ class Module:
         self.monitor_layout = []
         self.panels = []
 
-        for i in range(0, n_mons):
+        for i in range(n_mons):
             self.monitor_layout.append(Monitor())
 
-        selected = None
         for panel in panels:
             panel_id, monitor_id, position = panel.split(":")
             panel_id = int(panel_id)
@@ -181,10 +225,7 @@ class Module:
                 if j != -1:
                     self.panels.append(j)
 
-        if len(self.panels) == 0:
-            self.panel_bg.hide()
-        else:
-            self.panel_bg.show()
+        self.revealer.set_reveal_child(len(self.panels) != 0)
 
         show_add = False
         for i in range(0, n_mons):
@@ -205,27 +246,31 @@ class Module:
         if len(self.panels) == 0:
             return
 
-        self.panel_id = self.panels[current_idx]
+        if self.panel_id != self.panels[current_idx]:
+            if self.proxy:
+                self.proxy.highlightPanel('(ib)', self.panel_id, False)
+            self.panel_id = self.panels[current_idx]
 
-        if self.panel_id:
-            self.proxy.highlightPanel(self.panel_id, True, dbus_interface='org.Cinnamon')
+            self.pending_visible.set_panel_id(self.panel_id)
+
+            self.pending_visible, self.current_visible = self.current_visible, self.pending_visible
+            self.config_stack.set_visible_child(self.current_visible)
+
+        if self.proxy:
+            self.proxy.highlightPanel('(ib)', self.panel_id, True)
 
     def restore_panels(self, widget):
-        self.proxy.destroyDummyPanels(dbus_interface='org.Cinnamon')
+        self.proxy.destroyDummyPanels()
         if self.panel_id:
-            self.proxy.highlightPanel(int(self.panel_id), False, dbus_interface='org.Cinnamon')
+            self.proxy.highlightPanel('(ib)', self.panel_id, False)
 
-class PanelCheckButton(Gtk.CheckButton):
-    def __init__(self, label, schema, key, dep_key, panel_id):
-        self.key = key
-        self.dep_key = dep_key
+class PanelWidget(SettingsWidget):
+    def __init__(self, dep_key, panel_id):
+        super(PanelWidget, self).__init__()
+
         self.panel_id = str(panel_id)
+        self.dep_key = dep_key
 
-        super(PanelCheckButton, self).__init__(label)
-        self.settings = Gio.Settings.new(schema)
-        self.set_active(self.get_boolean(self.settings, self.key))
-        self.settings.connect("changed::"+self.key, self.on_my_setting_changed)
-        self.connectorId = self.connect('toggled', self.on_my_value_changed)
         self.dependency_invert = False
         if self.dep_key is not None:
             if self.dep_key[0] == '!':
@@ -235,21 +280,6 @@ class PanelCheckButton(Gtk.CheckButton):
             self.dep_settings = Gio.Settings.new(split[0])
             self.dep_key = split[1]
             self.dep_settings.connect("changed::"+self.dep_key, self.on_dependency_setting_changed)
-            self.on_dependency_setting_changed(self, None)
-
-    def on_my_setting_changed(self, settings, key):
-        self.disconnect(self.connectorId)                     #  panel-edit-mode can trigger changed:: twice in certain instances,
-        self.set_active(self.get_boolean(self.settings, self.key))  #  so disconnect temporarily when we are simply updating the widget state
-        self.connectorId = self.connect('toggled', self.on_my_value_changed)
-
-    def on_my_value_changed(self, widget):
-        self.set_boolean(self.settings, self.key, self.get_active())
-
-    def on_dependency_setting_changed(self, settings, dep_key):
-        if not self.dependency_invert:
-            self.set_sensitive(self.get_boolean(self.dep_settings, self.dep_key))
-        else:
-            self.set_sensitive(not self.get_boolean(self.dep_settings, self.dep_key))
 
     def get_boolean(self, settings, key):
         values = settings.get_strv(key)
@@ -258,16 +288,17 @@ class PanelCheckButton(Gtk.CheckButton):
             if value.split(":")[0] == self.panel_id:
                 prop = value.split(":")[1]
 
-        return prop=="true"
+        return prop != "false"
 
     def set_boolean(self, settings, key, value):
         value = "true" if value else "false" # Convert to text
 
         values = settings.get_strv(key)
         _set = False
-        for i in range(len(values)):
-            if values[i].split(":")[0] == self.panel_id:
-                values[i] = values[i].split(":")[0] + ":" + value
+
+        for i, val in enumerate(values):
+            if val.split(":")[0] == self.panel_id:
+                values[i] = self.panel_id + ":" + value
                 _set = True
         if not _set:
             values.append(self.panel_id + ":" + value)
@@ -278,271 +309,247 @@ class PanelCheckButton(Gtk.CheckButton):
         self.panel_id = str(panel_id)
         self.on_my_setting_changed(None, None)
         if self.dep_key:
-            self.on_dependency_setting_changed(None, None)
+            self.on_dependency_setting_changed()
 
-class PanelSpinButton(Gtk.HBox):
-    def __init__(self, label, schema, key, dep_key, min, max, step, page, units, panel_id):
+    def on_dependency_setting_changed(self, *args):
+        if not self.dependency_invert:
+            self.revealer.set_reveal_child(self.get_boolean(self.dep_settings, self.dep_key))
+        else:
+            self.revealer.set_reveal_child(not self.get_boolean(self.dep_settings, self.dep_key))
+
+    def get_int(self, settings, key):
+        values = settings.get_strv(key)
+        prop = 0
+        for value in values:
+            if value.split(":")[0] == self.panel_id:
+                prop = value.split(":")[1]
+
+        return int(prop)
+
+    def set_int(self, settings, key, value):
+        values = settings.get_strv(key)
+        _set = False
+        for i, val in enumerate(values):
+            if val.split(":")[0] == self.panel_id:
+                values[i] = self.panel_id + ":" + str(int(value))
+                _set = True
+        if not _set:
+            values.append(self.panel_id + ":" + str(int(value)))
+
+        settings.set_strv(key, values)
+
+    def get_string(self, settings, key):
+        values = settings.get_strv(key)
+        prop = ""
+        for value in values:
+            if value.split(":")[0] == self.panel_id:
+                prop = value.split(":")[1]
+
+        return prop
+
+    def set_string(self, settings, key, value):
+        values = settings.get_strv(key)
+        _set = False
+        for i, val in enumerate(values):
+            if val.split(":")[0] == self.panel_id:
+                values[i] = self.panel_id + ":" + value
+                _set = True
+        if not _set:
+            values.append(self.panel_id + ":" + value)
+
+        settings.set_strv(key, values)
+
+class PanelSwitch(PanelWidget):
+    def __init__(self, label, schema, key, panel_id, dep_key=None):
+        super(PanelSwitch, self).__init__(dep_key, panel_id)
         self.key = key
-        self.min = min
-        self.max = max
-        self.panel_id = str(panel_id)
-        self.dep_key = dep_key
-        super(PanelSpinButton, self).__init__()
+
+        self.content_widget = Gtk.Switch()
         self.label = Gtk.Label(label)
+
+        self.pack_start(self.label, False, False, 0)
+        self.pack_end(self.content_widget, False, False, 0)
+
+        self.settings = Gio.Settings.new(schema)
+        self.connectorId = None
+
+        self.on_my_setting_changed()
+
+    def on_my_setting_changed(self, *args):
+        if self.connectorId:
+            self.content_widget.disconnect(self.connectorId)                     #  panel-edit-mode can trigger changed:: twice in certain instances,
+        self.content_widget.set_active(self.get_boolean(self.settings, self.key))  #  so disconnect temporarily when we are simply updating the widget state
+        self.connectorId = self.content_widget.connect("notify::active", self.on_my_value_changed)
+
+    def on_my_value_changed(self, *args):
+        self.set_boolean(self.settings, self.key, self.content_widget.get_active())
+
+class PanelSpinButton(PanelWidget):
+    def __init__(self, label, schema, key, panel_id, units="", mini=None, maxi=None, step=1, page=None, dep_key=None):
+        super(PanelSpinButton, self).__init__(dep_key, panel_id)
+        self.key = key
+        self._changed_timer = None
+
+        if units:
+            label += " (%s)" % units
+
+        self.label = Gtk.Label.new(label)
         self.content_widget = Gtk.SpinButton()
-        self.units = Gtk.Label(units)
-        if (label != ""):
-            self.pack_start(self.label, False, False, 2)
-        self.pack_start(self.content_widget, False, False, 2)
-        if (units != ""):
-            self.pack_start(self.units, False, False, 2)
+
+        self.pack_start(self.label, False, False, 0)
+        self.pack_end(self.content_widget, False, False, 0)
 
         self.settings = Gio.Settings.new(schema)
 
-        self.content_widget.set_range(self.min, self.max)
-        self.content_widget.set_increments(step, page)
-        self.content_widget.set_value(self.get_int(self.settings, self.key))
-        self.settings.connect("changed::"+self.key, self.on_my_setting_changed)
-        self.content_widget.connect('value-changed', self.on_my_value_changed)
-        self.dependency_invert = False
-        if self.dep_key is not None:
-            if self.dep_key[0] == '!':
-                self.dependency_invert = True
-                self.dep_key = self.dep_key[1:]
-            split = self.dep_key.split('/')
-            self.dep_settings = Gio.Settings.new(split[0])
-            self.dep_key = split[1]
-            self.dep_settings.connect("changed::"+self.dep_key, self.on_dependency_setting_changed)
-            self.on_dependency_setting_changed(self, None)
-        self._value_changed_timer = None
+        if not page:
+            page = step
 
-    def on_my_setting_changed(self, settings, key):
-        self.content_widget.set_value(self.get_int(self.settings, self.key))
+        self.content_widget.set_range(mini, maxi)
+        self.content_widget.set_increments(step, page)
+        
+        self.settings.connect("changed::" + self.key, self.on_my_setting_changed)
+        self.content_widget.connect('value-changed', self.on_my_value_changed)
+
+        self.on_my_setting_changed()
+
+    def on_my_setting_changed(self, *args):
+        def apply(self):
+            self.content_widget.set_value(self.get_int(self.settings, self.key))
+            self._changed_timer = None
+
+        if self._changed_timer:
+            GLib.source_remove(self._changed_timer)
+        self._changed_timer = GLib.timeout_add(300, apply, self)
 
     def on_my_value_changed(self, widget):
-        if self._value_changed_timer:
-            GObject.source_remove(self._value_changed_timer)
-        self._value_changed_timer = GObject.timeout_add(300, self.update_settings_value)
+        def apply(self):
+            self.set_int(self.settings, self.key, self.content_widget.get_value())
+            self._changed_timer = None
 
-    def update_settings_value(self):
-        self.set_int(self.settings, self.key, self.content_widget.get_value())
-        self._value_changed_timer = None
+        if self._changed_timer:
+            GLib.source_remove(self._changed_timer)
+        self._changed_timer = GLib.timeout_add(300, apply, self)
+
+    def update_widget_value(self):
         return False
 
-    def on_dependency_setting_changed(self, settings, dep_key):
-        if not self.dependency_invert:
-            self.set_sensitive(self.get_boolean(self.dep_settings, self.dep_key))
-        else:
-            self.set_sensitive(not self.get_boolean(self.dep_settings, self.dep_key))
+    def update_settings_value(self):
+        return False
 
-    def get_boolean(self, settings, key):
-        values = settings.get_strv(key)
-        prop = None
-        for value in values:
-            if value.split(":")[0] == self.panel_id:
-                prop = value.split(":")[1]
-
-        return prop=="true"
-
-    def get_int(self, settings, key):
-        values = settings.get_strv(key)
-        prop = None
-        for value in values:
-            if value.split(":")[0] == self.panel_id:
-                prop = value.split(":")[1]
-
-        if prop:
-            return int(prop)
-
-        return 0
-
-    def set_int(self, settings, key, value):
-        values = settings.get_strv(key)
-        _set = False
-        for i in range(len(values)):
-            if values[i].split(":")[0] == self.panel_id:
-                values[i] = values[i].split(":")[0] + ":" + str(int(value))
-                _set = True
-        if not _set:
-            values.append(self.panel_id + ":" + str(int(value)))
-
-        settings.set_strv(key, values)
-
-    def set_panel_id(self, panel_id):
-        self.panel_id = str(panel_id)
-        self.on_my_setting_changed(None, None)
-        if self.dep_key:
-            self.on_dependency_setting_changed(None, None)
-
-class PanelIntRange(Gtk.HBox):
-    def __init__(self, label, low_label, hi_label, low_limit, hi_limit, inverted, exponential, schema, key, dep_key,panel_id, **options):
-        super(PanelIntRange, self).__init__()
+class PanelRange(PanelWidget):
+    def __init__(self, label, schema, key, panel_id, min_label, max_label, mini=None, maxi=None, step=None, dep_key=None):
+        # We do not implement invert and log here since it is not needed
+        super(PanelRange, self).__init__(dep_key, panel_id)
+        self.set_orientation(Gtk.Orientation.VERTICAL)
+        self.set_spacing(0)
+        
         self.key = key
-        self.dep_key = dep_key
         self.settings = Gio.Settings.new(schema)
         self.panel_id = str(panel_id)
+        self._changed_timer = None
 
-        self.value = self.get_int(self.settings, self.key) * 1.0
+        hbox = Gtk.Box()
+
         self.label = Gtk.Label.new(label)
-        self.label.set_alignment(1.0, 0.5)
-        self.label.set_size_request(150, -1)
-        self.low_label = Gtk.Label()
-        self.low_label.set_alignment(0.5, 0.5)
-        self.low_label.set_size_request(60, -1)
-        self.hi_label = Gtk.Label()
-        self.hi_label.set_alignment(0.5, 0.5)
-        self.hi_label.set_size_request(60, -1)
-        self.low_label.set_markup("<i><small>%s</small></i>" % low_label)
-        self.hi_label.set_markup("<i><small>%s</small></i>" % hi_label)
-        self.inverted = inverted
-        self.exponential = exponential
-        self._range = (hi_limit - low_limit) * 1.0
-        self._step = options.get('adjustment_step', 1)
-        self._min = low_limit * 1.0
-        self._max = hi_limit * 1.0
-        self.content_widget = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0, 1, (self._step / self._range))
-        self.content_widget.set_size_request(300, 0)
-        self.content_widget.set_value(self.to_corrected(self.value))
-        self.content_widget.set_draw_value(False);
+        self.label.set_halign(Gtk.Align.CENTER)
 
-        self.grid = Gtk.Grid()
-        if (label != ""):
-            self.grid.attach(self.label, 0, 0, 1, 1)
-        if (low_label != ""):
-            self.grid.attach(self.low_label, 1, 0, 1, 1)
-        self.grid.attach(self.content_widget, 2, 0, 1, 1)
-        if (hi_label != ""):
-            self.grid.attach(self.hi_label, 3, 0, 1, 1)
-        self.pack_start(self.grid, True, True, 2)
-        self._dragging = False
+        self.min_label= Gtk.Label()
+        self.max_label = Gtk.Label()
+        self.min_label.set_alignment(1.0, 0.75)
+        self.max_label.set_alignment(1.0, 0.75)
+        self.min_label.set_margin_right(6)
+        self.max_label.set_margin_left(6)
+        self.min_label.set_markup("<i><small>%s</small></i>" % min_label)
+        self.max_label.set_markup("<i><small>%s</small></i>" % max_label)
+
+        if step is None:
+            self.step = (maxi - mini) * 0.02
+
+        self.content_widget = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, mini, maxi, self.step)
+        self.content_widget.set_draw_value(False)
+
+        hbox.pack_start(self.min_label, False, False, 0)
+        hbox.pack_start(self.content_widget, True, True, 0)
+        hbox.pack_start(self.max_label, False, False, 0)
+
+        self.pack_start(self.label, False, False, 0)
+        self.pack_start(hbox, True, True, 6)
+
+        self.content_widget.connect("scroll-event", self.on_scroll_event)
+
         self.content_widget.connect('value-changed', self.on_my_value_changed)
-        self.content_widget.connect('button-press-event', self.on_mouse_down)
-        self.content_widget.connect('button-release-event', self.on_mouse_up)
-        self.content_widget.connect("scroll-event", self.on_mouse_scroll_event)
         self.content_widget.show_all()
-        self.dependency_invert = False
-        self.settings.connect("changed::"+self.key, self.on_my_setting_changed)
-        if self.dep_key is not None:
-            if self.dep_key[0] == '!':
-                self.dependency_invert = True
-                self.dep_key = self.dep_key[1:]
-            split = self.dep_key.split('/')
-            self.dep_settings = Gio.Settings.new(split[0])
-            self.dep_key = split[1]
-            self.dep_settings.connect("changed::"+self.dep_key, self.on_dependency_setting_changed)
-            self.on_dependency_setting_changed(self, None)
 
-# halt writing gsettings during dragging
-# it can take a long time to process all
-# those updates, and the system can crash
-    def on_my_setting_changed(self, settings, key):
-        self.value = self.get_int(self.settings, self.key) * 1.0
-        self.content_widget.set_value(self.to_corrected(self.value))
-
-    def on_mouse_down(self, widget, event):
-        self._dragging = True
-
-    def on_mouse_up(self, widget, event):
-        self._dragging = False
-        self.on_my_value_changed(widget)
-
-    def on_mouse_scroll_event(self, widget, event):
+    def on_scroll_event(self, widget, event):
         found, delta_x, delta_y = event.get_scroll_deltas()
-        if found:
-            add = delta_y < 0
-            uncorrected = self.from_corrected(widget.get_value())
-            if add:
-                corrected = self.to_corrected(uncorrected + self._step)
-            else:
-                corrected = self.to_corrected(uncorrected - self._step)
-            widget.set_value(corrected)
+
+        # If you scroll up, delta_y < 0. This is a weird world
+        widget.set_value(widget.get_value() - delta_y * self.step)
+
         return True
 
+    def on_my_setting_changed(self, *args):
+        def apply(self):
+            self.content_widget.set_value(self.get_int(self.settings, self.key))
+            self._changed_timer = None
+
+        if self._changed_timer:
+            GLib.source_remove(self._changed_timer)
+        self._changed_timer = GLib.timeout_add(300, apply, self)
+
     def on_my_value_changed(self, widget):
-        if self._dragging:
-            return
-        corrected = self.from_corrected(widget.get_value())
-        self.set_int(self.settings, self.key, corrected)
+        def apply(self):
+            self.set_int(self.settings, self.key, self.content_widget.get_value())
+            self._changed_timer = None
 
-    def on_dependency_setting_changed(self, settings, dep_key):
-        if not self.dependency_invert:
-            self.set_sensitive(self.get_boolean(self.settings, self.dep_key))
-        else:
-            self.set_sensitive(not self.get_boolean(self.settings, self.dep_key))
-
-    def to_corrected(self, value):
-        result = 0.0
-        if self.exponential:
-            k = (math.log(self._max) - math.log(self._min)) / (self._range / self._step)
-            a = self._max / math.exp(k * self._range)
-            cur_val_step = (1 / (k / math.log(value / a))) / self._range
-            if self.inverted:
-                result = 1 - cur_val_step
-            else:
-                result = cur_val_step
-        else:
-            if self.inverted:
-                result = 1 - ((value - self._min) / self._range)
-            else:
-                result = (value - self._min) / self._range
-        return result
-
-    def from_corrected(self, value):
-        result = 0.0
-        if self.exponential:
-            k = (math.log(self._max)-math.log(self._min))/(self._range / self._step)
-            a = self._max / math.exp(k * self._range)
-            if self.inverted:
-                cur_val_step = (1 - value) * self._range
-                result = a * math.exp(k * cur_val_step)
-            else:
-                cur_val_step = value * self._range
-                result =  a * math.exp(k * cur_val_step)
-        else:
-            if self.inverted:
-                result = ((1 - value) * self._range) + self._min
-            else:
-                result =  (value * self._range) + self._min
-        return round(result)
+        if self._changed_timer:
+            GLib.source_remove(self._changed_timer)
+        self._changed_timer = GLib.timeout_add(300, apply, self)
 
     def add_mark(self, value, position, markup):
-        self.content_widget.add_mark((value - self._min) / self._range, position, markup)
+        self.content_widget.add_mark(value, position, markup)
 
-    def get_boolean(self, settings, key):
-        values = settings.get_strv(key)
-        prop = None
-        for value in values:
-            if value.split(":")[0] == self.panel_id:
-                prop = value.split(":")[1]
+class PanelComboBox(PanelWidget):
+    def __init__(self, label, schema, key, panel_id, options, dep_key=None):
+        super(PanelComboBox, self).__init__(dep_key, panel_id)
 
-        return prop=="true"
+        self.settings = Gio.Settings.new(schema)
+        self.key = key
+        self.option_map = {}
 
-    def get_int(self, settings, key):
-        values = settings.get_strv(key)
-        prop = None
-        for value in values:
-            if value.split(":")[0] == self.panel_id:
-                prop = value.split(":")[1]
+        self.label = Gtk.Label.new(label)
+        self.model = Gtk.ListStore(str, str)
 
-        if prop:
-            return int(prop)
+        for option in options:
+            iter = self.model.insert_before(None, None)
+            option.append(iter)
+            self.model.set_value(iter, 0, option[0])
+            self.model.set_value(iter, 1, option[1])
+            self.option_map[option[0]] = iter
 
-        return 0
+        self.content_widget = Gtk.ComboBox.new_with_model(self.model)
+        renderer_text = Gtk.CellRendererText()
+        self.content_widget.pack_start(renderer_text, True)
+        self.content_widget.add_attribute(renderer_text, "text", 1)
 
-    def set_int(self, settings, key, value):
-        values = settings.get_strv(key)
-        _set = False
-        for i in range(len(values)):
-            if values[i].split(":")[0] == self.panel_id:
-                values[i] = values[i].split(":")[0] + ":" + str(int(value))
-                _set = True
-        if not _set:
-            values.append(self.panel_id + ":" + str(int(value)))
+        self.pack_start(self.label, False, False, 2)
+        self.pack_end(self.content_widget, False, False, 2)
+        self.content_widget.show_all()
 
-        settings.set_strv(key, values)
+        self.content_widget.connect('changed', self.on_my_value_changed)
+        self.settings.connect("changed::" + self.key, self.on_my_setting_changed)
 
-    def set_panel_id(self, panel_id):
-        self.panel_id = str(panel_id)
-        self.on_my_setting_changed(None, None)
-        if self.dep_key:
-            self.on_dependency_setting_changed(None, None)
+        self.on_my_setting_changed()
+
+    def on_my_value_changed(self, widget):
+        tree_iter = widget.get_active_iter()
+        if tree_iter != None:
+            value = self.model[tree_iter][0]
+            self.set_string(self.settings, self.key, value)
+
+    def on_my_setting_changed(self, *args):
+        try:
+            self.value = self.get_string(self.settings, self.key)
+            self.content_widget.set_active_iter(self.option_map[self.value])
+        except:
+            pass

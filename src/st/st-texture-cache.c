@@ -23,6 +23,7 @@
 
 #include "st-texture-cache.h"
 #include "st-private.h"
+#include "st-cogl-wrapper.h"
 #include <gtk/gtk.h>
 #include <string.h>
 #include <glib.h>
@@ -569,9 +570,7 @@ data_to_cogl_texture (const guchar *data,
                       int           rowstride,
                       gboolean      add_padding)
 {
-  ClutterBackend *backend = clutter_get_default_backend ();
-  CoglContext *ctx = clutter_backend_get_cogl_context (backend);
-  CoglHandle texture, offscreen;
+  CoglHandle texture, offscreen = NULL;
   CoglColor clear_color;
   guint size;
   GError *error;
@@ -579,46 +578,42 @@ data_to_cogl_texture (const guchar *data,
   size = MAX (width, height);
 
   if (!add_padding || width == height)
-    return COGL_TEXTURE (cogl_texture_2d_new_from_data (ctx,
-                                                        width,
-                                                        height,
-                                                        has_alpha ? COGL_PIXEL_FORMAT_RGBA_8888 : COGL_PIXEL_FORMAT_RGB_888,
-#if COGL_VERSION < COGL_VERSION_ENCODE (1, 18, 0)
-                                                        COGL_PIXEL_FORMAT_ANY,
-#endif
-                                                        rowstride,
-                                                        data,
-                                                        NULL));
+    return st_cogl_texture_new_from_data_wrapper (width, height,
+                                                  COGL_TEXTURE_NONE,
+                                                  has_alpha ? COGL_PIXEL_FORMAT_RGBA_8888 : COGL_PIXEL_FORMAT_RGB_888,
+                                                  COGL_PIXEL_FORMAT_ANY,
+                                                  rowstride, data);
 
-  texture = cogl_texture_2d_new_with_size (ctx,
-                                           size,
-                                           size
-#if COGL_VERSION < COGL_VERSION_ENCODE (1, 18, 0)
-                                           ,COGL_PIXEL_FORMAT_ANY
-#endif
-                                           );
-
-  offscreen = cogl_offscreen_new_to_texture (texture);
+  texture = st_cogl_texture_new_with_size_wrapper (size, size,
+                                                   COGL_TEXTURE_NO_SLICING,
+                                                   COGL_PIXEL_FORMAT_ANY);
+  if (texture)
+    offscreen = cogl_offscreen_new_to_texture (texture);
 
   error = NULL;
-  if (!cogl_framebuffer_allocate (offscreen, &error))
+  if (!texture || !offscreen || !cogl_framebuffer_allocate (offscreen, &error))
     {
-      g_warning ("Failed to allocate FBO (sized %d): %s", size, error->message);
+      if (!texture)
+        g_warning("Failed to allocate texture (sized %d)", size);
+      else if (!offscreen)
+        {
+          g_warning("Failed to allocate offscreen for texture (sized %d)", size);
+          cogl_object_unref (texture);
+        }
+      else
+        {
+          g_warning ("Failed to allocate FBO (sized %d): %s", size, error->message);
+          cogl_object_unref (texture);
+          cogl_object_unref (offscreen);
+          g_clear_error (&error);
+        }
 
-      cogl_object_unref (texture);
-      cogl_object_unref (offscreen);
-      g_clear_error (&error);
-
-      return COGL_TEXTURE (cogl_texture_2d_new_from_data (ctx,
-                                                          width,
-                                                          height,
-                                                          has_alpha ? COGL_PIXEL_FORMAT_RGBA_8888 : COGL_PIXEL_FORMAT_RGB_888,
-#if COGL_VERSION < COGL_VERSION_ENCODE (1, 18, 0)
-                                                          COGL_PIXEL_FORMAT_ANY,
-#endif
-                                                          rowstride,
-                                                          data,
-                                                          NULL));
+      return st_cogl_texture_new_from_data_wrapper (width, height,
+                                                    COGL_TEXTURE_NONE,
+                                                    has_alpha ? COGL_PIXEL_FORMAT_RGBA_8888 : COGL_PIXEL_FORMAT_RGB_888,
+                                                    COGL_PIXEL_FORMAT_ANY,
+                                                    rowstride,
+                                                    data);
   }
 
   cogl_color_set_from_4ub (&clear_color, 0, 0, 0, 0);
@@ -1137,18 +1132,29 @@ static void
 ensure_monitor_for_uri (StTextureCache *cache,
                         const gchar    *uri)
 {
-  StTextureCachePrivate *priv = cache->priv;
-  GFile *file = g_file_new_for_uri (uri);
+  /* Don't monitor changes at all.
+   * We're keeping this function for now, even if it doesn't do anything
+   * In case special cases come up in the future, where monitors are needed for particular uris.
+   */
 
-  if (g_hash_table_lookup (priv->file_monitors, uri) == NULL)
-    {
-      GFileMonitor *monitor = g_file_monitor_file (file, G_FILE_MONITOR_NONE,
-                                                   NULL, NULL);
-      g_signal_connect (monitor, "changed",
-                        G_CALLBACK (file_changed_cb), cache);
-      g_hash_table_insert (priv->file_monitors, g_strdup (uri), monitor);
-    }
-  g_object_unref (file);
+  // StTextureCachePrivate *priv = cache->priv;
+  // GFile *file = g_file_new_for_uri (uri);
+
+  // /* No point in trying to monitor files that are part of a
+  //  * GResource, since it does not support file monitoring.
+  //  */
+  // if (!g_file_has_uri_scheme (file, "resource")) {
+  //   if (g_hash_table_lookup (priv->file_monitors, uri) == NULL)
+  //   {
+  //     GFileMonitor *monitor = g_file_monitor_file (file, G_FILE_MONITOR_NONE,
+  //                                                  NULL, NULL);
+  //     g_signal_connect (monitor, "changed",
+  //                       G_CALLBACK (file_changed_cb), cache);
+  //     g_hash_table_insert (priv->file_monitors, g_strdup (uri), monitor);
+  //   }
+  // }
+
+  // g_object_unref (file);
 }
 
 typedef struct {
@@ -1359,8 +1365,6 @@ create_faded_icon_cpu (StTextureCache *cache,
                                  void           *datap,
                                  GError        **error)
 {
-  ClutterBackend *backend = clutter_get_default_backend ();
-  CoglContext *ctx = clutter_backend_get_cogl_context (backend);
   CreateFadedIconData *data = datap;
   char *name;
   GdkPixbuf *pixbuf;
@@ -1441,16 +1445,12 @@ create_faded_icon_cpu (StTextureCache *cache,
         }
     }
 
-  texture = COGL_TEXTURE (cogl_texture_2d_new_from_data (ctx,
-                                                         width,
-                                                         height,
-                                                         have_alpha ? COGL_PIXEL_FORMAT_RGBA_8888 : COGL_PIXEL_FORMAT_RGB_888,
-#if COGL_VERSION < COGL_VERSION_ENCODE (1, 18, 0)
-                                                         COGL_PIXEL_FORMAT_ANY,
-#endif
-                                                         rowstride,
-                                                         pixels,
-                                                         NULL));
+  texture = st_cogl_texture_new_from_data_wrapper (width, height,
+                                                   COGL_TEXTURE_NONE,
+                                                   have_alpha ? COGL_PIXEL_FORMAT_RGBA_8888 : COGL_PIXEL_FORMAT_RGB_888,
+                                                   COGL_PIXEL_FORMAT_ANY,
+                                                   rowstride,
+                                                   pixels);
   g_free (pixels);
   g_object_unref (pixbuf);
 

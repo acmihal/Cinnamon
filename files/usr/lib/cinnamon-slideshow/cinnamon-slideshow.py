@@ -1,10 +1,11 @@
-#! /usr/bin/python
+#! /usr/bin/python2
 
 from gi.repository import Gio, GLib
 import dbus, dbus.service, dbus.glib
 from dbus.mainloop.glib import DBusGMainLoop
 import random
-import os, locale, lxml.etree
+import os, locale
+from xml.etree import ElementTree
 
 SLIDESHOW_DBUS_NAME = "org.Cinnamon.Slideshow"
 SLIDESHOW_DBUS_PATH = "/org/Cinnamon/Slideshow"
@@ -161,23 +162,26 @@ class CinnamonSlideshow(dbus.service.Object):
         self.start_mainloop()
 
     def on_monitored_folder_changed(self, monitor, file1, file2, event_type):
-        if event_type == Gio.FileMonitorEvent.DELETED:
-            file_uri = file1.get_uri();
-            if self.image_playlist.count(file_uri) > 0:
-                index_to_remove = self.image_playlist.index(file_uri)
-                del self.image_playlist[index_to_remove]
-            elif self.used_image_playlist.count(file_uri) > 0:
-                index_to_remove = self.used_image_playlist.index(file_uri)
-                del self.used_image_playlist[index_to_remove]
+        try:
+            if event_type == Gio.FileMonitorEvent.DELETED:
+                file_uri = file1.get_uri();
+                if self.image_playlist.count(file_uri) > 0:
+                    index_to_remove = self.image_playlist.index(file_uri)
+                    del self.image_playlist[index_to_remove]
+                elif self.used_image_playlist.count(file_uri) > 0:
+                    index_to_remove = self.used_image_playlist.index(file_uri)
+                    del self.used_image_playlist[index_to_remove]
 
-        if event_type == Gio.FileMonitorEvent.CREATED:
-            file_path = file1.get_path()
-            file_info = file1.query_info("standard::type,standard::content-type", Gio.FileQueryInfoFlags.NONE, None)
-            file_type = file_info.get_file_type()
-            if file_type is not Gio.FileType.DIRECTORY:
-                file_contents = file_info.get_content_type();
-                if file_contents.startswith("image"):
-                    self.add_image_to_playlist(file_path)
+            if event_type == Gio.FileMonitorEvent.CREATED:
+                file_path = file1.get_path()
+                file_info = file1.query_info("standard::type,standard::content-type", Gio.FileQueryInfoFlags.NONE, None)
+                file_type = file_info.get_file_type()
+                if file_type is not Gio.FileType.DIRECTORY:
+                    file_contents = file_info.get_content_type();
+                    if file_contents.startswith("image"):
+                        self.add_image_to_playlist(file_path)
+        except:
+            pass
 
     def on_random_order_changed(self, settings, key):
         self.random_order = self.slideshow_settings.get_boolean("random-order")
@@ -274,7 +278,7 @@ class CinnamonSlideshow(dbus.service.Object):
             res = []
             subLocaleFound = False
             f = open(filename)
-            rootNode = lxml.etree.fromstring(f.read())
+            rootNode = ElementTree.fromstring(f.read())
             f.close()
             if rootNode.tag == "wallpapers":
                 for wallpaperNode in rootNode:

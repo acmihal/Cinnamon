@@ -5,6 +5,7 @@ const Clutter = imports.gi.Clutter;
 const Applet = imports.ui.applet;
 const Main = imports.ui.main;
 const Mainloop = imports.mainloop;
+const SignalManager = imports.misc.signalManager;
 
 const ICON_SCALE_FACTOR = .8; // for custom panel heights, 20 (default icon size) / 25 (default panel height)
 
@@ -21,10 +22,7 @@ MyApplet.prototype = {
         this.actor.remove_style_class_name("applet-box");
         this.actor.style="spacing: 5px;";
 
-        this._signals = { added: null,
-                          removed: null,
-                          redisplay: null,
-                          registered: null };
+        this._signalManager = new SignalManager.SignalManager(this);
 
         let manager = new Clutter.BoxLayout( { spacing: 2 * global.ui_scale,
                                                homogeneous: true,
@@ -41,18 +39,16 @@ MyApplet.prototype = {
     },
 
     on_applet_removed_from_panel: function () {
-        Main.statusIconDispatcher.disconnect(this._signals.added);
-        Main.statusIconDispatcher.disconnect(this._signals.removed);
-        Main.statusIconDispatcher.disconnect(this._signals.redisplay);
-        Main.systrayManager.disconnect(this._signals.registered);
+        this._signalManager.disconnectAllSignals();
     },
 
     on_applet_added_to_panel: function() {
         Main.statusIconDispatcher.start(this.actor.get_parent().get_parent());
-        this._signals.added = Main.statusIconDispatcher.connect('status-icon-added', Lang.bind(this, this._onTrayIconAdded));
-        this._signals.removed = Main.statusIconDispatcher.connect('status-icon-removed', Lang.bind(this, this._onTrayIconRemoved));
-        this._signals.redisplay = Main.statusIconDispatcher.connect('before-redisplay', Lang.bind(this, this._onBeforeRedisplay));
-        this._signals.registered = Main.systrayManager.connect("changed", Lang.bind(Main.statusIconDispatcher, Main.statusIconDispatcher.redisplay));
+
+        this._signalManager.connect(Main.statusIconDispatcher, 'status-icon-added', this._onTrayIconAdded);
+        this._signalManager.connect(Main.statusIconDispatcher, 'status-icon-removed', this._onTrayIconRemoved);
+        this._signalManager.connect(Main.statusIconDispatcher, 'before-redisplay', this._onBeforeRedisplay);
+        this._signalManager.connect(Main.systrayManager, "changed", Main.statusIconDispatcher.redisplay, Main.statusIconDispatcher);
     },
 
     on_panel_height_changed: function() {
@@ -75,28 +71,12 @@ MyApplet.prototype = {
                 return;
             }
 
-            let buggyIcons = ["pidgin", "thunderbird"];            
-
             global.log("Adding systray: " + role + " (" + icon.get_width() + "x" + icon.get_height() + "px)");
 
             if (icon.get_parent())
                 icon.get_parent().remove_child(icon);
 
-            if (this._scaleMode) {
-                let disp_size = this._panelHeight * ICON_SCALE_FACTOR;
-                if (icon.get_height() != disp_size) {
-                    if (icon.get_width() == 1 || icon.get_height() == 1 || buggyIcons.indexOf(role) != -1) {
-                        if (icon.get_height() > disp_size) {                        
-                            icon.set_height(disp_size);
-                            global.log("   Changed the height of " + role + " (" + icon.get_width() + "x" + icon.get_height() + "px)");
-                        }
-                    }
-                    else {                    
-                        icon.set_size(disp_size, disp_size);
-                        global.log("   Resized " + role + " (" + icon.get_width() + "x" + icon.get_height() + "px)");
-                    }
-                }                
-            }
+            this.resize_icon(icon, role);
 
             /* dropbox, for some reason, refuses to provide a correct size icon in our new situation.
              * Tried even with stalonetray, same results - all systray icons I tested work fine but dropbox.  I'm
@@ -111,15 +91,8 @@ MyApplet.prototype = {
 
             let timerId = 0;
             let i = 0;
-            timerId = Mainloop.timeout_add(500, Lang.bind(this, function() {               
-                if (this._scaleMode) {
-                    let disp_size = this._panelHeight * ICON_SCALE_FACTOR;
-                    let size = disp_size;
-                    if (icon.width == disp_size){
-                        size = disp_size - 1;
-                    }
-                    icon.set_size(size, size);
-                }
+            timerId = Mainloop.timeout_add(500, Lang.bind(this, function() {
+                this.resize_icon(icon, role);
                 i++;
                 if (i == 2) {
                     Mainloop.source_remove(timerId);
@@ -128,6 +101,48 @@ MyApplet.prototype = {
 
         } catch (e) {
             global.logError(e);
+        }
+    },
+
+    resize_icon: function(icon, role) {
+        if (this._scaleMode) {
+            let disp_size = this._panelHeight * ICON_SCALE_FACTOR;
+            let size;
+            if (icon.get_height() != disp_size) {
+                size = disp_size;
+            }
+            else {
+                // Force a resize with a slightly different size
+                size = disp_size - 1;
+            }
+
+            // Don't try to scale buggy icons, give them predefined sizes
+            // This, in the case of pidgin, fixes the icon being cropped in the systray
+            if (["pidgin", "thunderbird"].indexOf(role) != -1) {
+                if (disp_size < 22) {
+                    size = 16;
+                }
+                else if (disp_size < 32) {
+                    size = 22;
+                }
+                else if (disp_size < 48) {
+                    size = 32;
+                }
+                else {
+                    size = 48;
+                }
+            }
+
+            icon.set_size(size, size);
+
+            global.log("Resized " + role + " (" + icon.get_width() + "x" + icon.get_height() + "px)");
+        }
+        else {
+            // Force buggy icon size when not in scale mode
+            if (["pidgin", "thunderbird"].indexOf(role) != -1) {
+                icon.set_size(16, 16);
+                global.log("Resized " + role + " (" + icon.get_width() + "x" + icon.get_height() + "px)");
+            }
         }
     },
 

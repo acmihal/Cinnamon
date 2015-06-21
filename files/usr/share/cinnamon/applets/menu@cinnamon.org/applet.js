@@ -1084,10 +1084,10 @@ MyApplet.prototype = {
 
     _init: function(orientation, panel_height, instance_id) {        
         Applet.TextIconApplet.prototype._init.call(this, orientation, panel_height, instance_id);
-        
-        try {                    
+        this.initial_load_done = false;
+
+        try {
             this.set_applet_tooltip(_("Menu"));
-                                    
             this.menuManager = new PopupMenu.PopupMenuManager(this);
             this.menu = new Applet.AppletPopupMenu(this, orientation);
             this.menuManager.addMenu(this.menu);   
@@ -1096,7 +1096,7 @@ MyApplet.prototype = {
 
             this.settings = new Settings.AppletSettings(this, "menu@cinnamon.org", instance_id);
 
-            this.settings.bindProperty(Settings.BindingDirection.IN, "show-places", "showPlaces", this._refreshPlacesAndRecent, null);
+            this.settings.bindProperty(Settings.BindingDirection.IN, "show-places", "showPlaces", this._refreshBelowApps, null);
 
             this.settings.bindProperty(Settings.BindingDirection.IN, "activate-on-hover", "activateOnHover", this._updateActivateOnHover, null);
             this._updateActivateOnHover();
@@ -1140,31 +1140,28 @@ MyApplet.prototype = {
             this._knownApps = new Array(); // Used to keep track of apps that are already installed, so we can highlight newly installed ones
             this._appsWereRefreshed = false;
             this._canUninstallApps = GLib.file_test("/usr/bin/cinnamon-remove-application", GLib.FileTest.EXISTS);
-
             this.RecentManager = new DocInfo.DocManager();
             this.privacy_settings = new Gio.Settings( {schema: PRIVACY_SCHEMA} );
-
             this._display();
-            appsys.connect('installed-changed', Lang.bind(this, this._refreshApps));
+            appsys.connect('installed-changed', Lang.bind(this, this._refreshAll));
             AppFavorites.getAppFavorites().connect('changed', Lang.bind(this, this._refreshFavs));
-
             this.settings.bindProperty(Settings.BindingDirection.IN, "hover-delay", "hover_delay_ms", this._update_hover_delay, null);
             this._update_hover_delay();
-
-            Main.placesManager.connect('places-updated', Lang.bind(this, this._refreshPlacesAndRecent));
-            this.RecentManager.connect('changed', Lang.bind(this, this._refreshPlacesAndRecent));
-            this.privacy_settings.connect("changed::" + REMEMBER_RECENT_KEY, Lang.bind(this, this._refreshPlacesAndRecent));
-
+            Main.placesManager.connect('places-updated', Lang.bind(this, this._refreshBelowApps));
+            this.RecentManager.connect('changed', Lang.bind(this, this._refreshRecent));
+            this.privacy_settings.connect("changed::" + REMEMBER_RECENT_KEY, Lang.bind(this, this._refreshRecent));
             this._fileFolderAccessActive = false;
-
             this._pathCompleter = new Gio.FilenameCompleter();
             this._pathCompleter.set_dirs_only(false);
             this.lastAcResults = new Array();
-
             this.settings.bindProperty(Settings.BindingDirection.IN, "search-filesystem", "searchFilesystem", null, null);
 
-            St.TextureCache.get_default().connect("icon-theme-changed", Lang.bind(this, this.onIconThemeChanged));
+            // We shouldn't need to call refreshAll() here... since we get a "icon-theme-changed" signal when CSD starts.
+            // The reason we do is in case the Cinnamon icon theme is the same as the one specificed in GTK itself (in .config)
+            // In that particular case we get no signal at all.
+            this._refreshAll();
 
+            St.TextureCache.get_default().connect("icon-theme-changed", Lang.bind(this, this.onIconThemeChanged));
             this._recalc_height();
         }
         catch (e) {
@@ -1180,9 +1177,19 @@ MyApplet.prototype = {
     },
 
     onIconThemeChanged: function() {
+        this._refreshAll();
+    },
+
+    _refreshAll: function() {
         this._refreshApps();
         this._refreshFavs();
-        this._refreshPlacesAndRecent;
+        this._refreshPlaces();
+        this._refreshRecent();
+    },
+
+    _refreshBelowApps: function() {
+        this._refreshPlaces();
+        this._refreshRecent();
     },
 
     openMenu: function() {
@@ -1219,8 +1226,15 @@ MyApplet.prototype = {
         this.menu.actor.add_style_class_name('menu-background');
         this.menu.connect('open-state-changed', Lang.bind(this, this._onOpenStateChanged));
         this._display();
+
+        if (this.initial_load_done)
+            this._refreshAll();
     },
-    
+
+    on_applet_added_to_panel: function () {
+        this.initial_load_done = true;
+    },
+
     _launch_editor: function() {
         Util.spawnCommandLine("cinnamon-menu-editor");
     },
@@ -1312,24 +1326,33 @@ MyApplet.prototype = {
 
     _updateIconAndLabel: function(){
         try {
-            if (this.menuIconCustom &&
-               (this.menuIcon == "" ||
-               (GLib.path_is_absolute(this.menuIcon) && GLib.file_test(this.menuIcon, GLib.FileTest.EXISTS)))) {
-                if (this.menuIcon.search("-symbolic") != -1)
-                    this.set_applet_icon_symbolic_path(this.menuIcon);
-                else
-                    this.set_applet_icon_path(this.menuIcon);
-            } else if (this.menuIconCustom &&
-                       Gtk.IconTheme.get_default().has_icon(this.menuIcon)) {
-                if (this.menuIcon.search("-symbolic") != -1)
-                    this.set_applet_icon_symbolic_name(this.menuIcon);
-                else
-                    this.set_applet_icon_name(this.menuIcon);
+            if (this.menuIconCustom) {
+                if (this.menuIcon == "") {
+                    this.set_applet_icon_name("");
+                } else if (GLib.path_is_absolute(this.menuIcon) && GLib.file_test(this.menuIcon, GLib.FileTest.EXISTS)) {
+                    if (this.menuIcon.search("-symbolic") != -1)
+                        this.set_applet_icon_symbolic_path(this.menuIcon);
+                    else
+                        this.set_applet_icon_path(this.menuIcon);
+                } else if (Gtk.IconTheme.get_default().has_icon(this.menuIcon)) {
+                    if (this.menuIcon.search("-symbolic") != -1)
+                        this.set_applet_icon_symbolic_name(this.menuIcon);
+                    else
+                        this.set_applet_icon_name(this.menuIcon);
+                }
+            } else {
+                this._set_default_menu_icon();
             }
-            else this._set_default_menu_icon();
         } catch(e) {
            global.logWarning("Could not load icon file \""+this.menuIcon+"\" for menu button");
         }
+
+        if (this.menuIconCustom && this.menuIcon == "") {
+            this._applet_icon_box.hide();
+        } else {
+            this._applet_icon_box.show();
+        }
+
         if (this.menuLabel != "")
             this.set_applet_label(_(this.menuLabel));
         else
@@ -1621,21 +1644,17 @@ MyApplet.prototype = {
         }
     },
 
-    _refreshPlacesAndRecent : function() {
+    _refreshPlaces : function() {
         for (let i = 0; i < this._placesButtons.length; i ++) {
             this._placesButtons[i].actor.destroy();
         }
-        for (let i = 0; i < this._recentButtons.length; i ++) {
-            this._recentButtons[i].actor.destroy();
-        }
+
         for (let i = 0; i < this._categoryButtons.length; i++) {
-            if (this._categoryButtons[i] instanceof PlaceCategoryButton ||
-                this._categoryButtons[i] instanceof RecentCategoryButton) {
+            if (this._categoryButtons[i] instanceof PlaceCategoryButton) {
                 this._categoryButtons[i].actor.destroy();
             }
         }
         this._placesButtons = new Array();
-        this._recentButtons = new Array();
 
         // Now generate Places category and places buttons and add to the list
         if (this.showPlaces) {
@@ -1705,6 +1724,24 @@ MyApplet.prototype = {
                 this.applicationsBox.add_actor(button.actor);
             }
         }
+
+        this._setCategoriesButtonActive(!this.searchActive);
+
+        this._recalc_height();
+        this._resizeApplicationsBox();
+    },
+
+    _refreshRecent : function() {
+        for (let i = 0; i < this._recentButtons.length; i ++) {
+            this._recentButtons[i].actor.destroy();
+        }
+        for (let i = 0; i < this._categoryButtons.length; i++) {
+            if (this._categoryButtons[i] instanceof RecentCategoryButton) {
+                this._categoryButtons[i].actor.destroy();
+            }
+        }
+        this._recentButtons = new Array();
+
         // Now generate recent category and recent files buttons and add to the list
         if (this.privacy_settings.get_boolean(REMEMBER_RECENT_KEY)) {
             this.recentButton = new RecentCategoryButton();
@@ -1940,9 +1977,6 @@ MyApplet.prototype = {
         }
 
         this._appsWereRefreshed = true;
-
-        this._refreshPlacesAndRecent();
-        this._resizeApplicationsBox();
     },
 
     _favEnterEvent : function(button) {
@@ -1957,7 +1991,6 @@ MyApplet.prototype = {
             this.selectedAppTitle.set_text(button.name);
             this.selectedAppDescription.set_text(button.desc);
         }
-        
     },
 
     _favLeaveEvent : function(widget, event, button) {
@@ -1970,7 +2003,7 @@ MyApplet.prototype = {
     _refreshFavs : function() {
         //Remove all favorites
         this.favoritesBox.destroy_all_children();
-         
+
         //Load favorites again
         this._favoritesButtons = new Array();
         let launchers = global.settings.get_strv('favorite-apps');
@@ -2211,8 +2244,6 @@ MyApplet.prototype = {
         this.favoritesBox = fav_obj.actor;
         this.leftBox.add_actor(this.favoritesBox, { y_align: St.Align.END, y_fill: false });
 
-        this._refreshFavs();
-
         this.mainBox = new St.BoxLayout({ style_class: 'menu-applications-outer-box', vertical:false });       
         this.mainBox.add_style_class_name('menu-applications-box'); //this is to support old themes
                 
@@ -2220,8 +2251,6 @@ MyApplet.prototype = {
         this.mainBox.add_actor(rightPane, { span: 1 });
         
         section.actor.add_actor(this.mainBox);
-
-        this._refreshApps();
 
         this.selectedAppBox = new St.BoxLayout({ style_class: 'menu-selected-app-box', vertical: true });
 

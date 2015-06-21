@@ -424,9 +424,7 @@ WindowManager.prototype = {
         this._animationBlockCount = 0;
 
         this._switchData = null;
-        this._cinnamonwm.connect('kill-switch-workspace', Lang.bind(this, this._switchWorkspaceDone));
         this._cinnamonwm.connect('kill-window-effects', Lang.bind(this, this._killWindowEffects));
-
         this._cinnamonwm.connect('switch-workspace', Lang.bind(this, this._switchWorkspace));
         this._cinnamonwm.connect('minimize', Lang.bind(this, this._minimizeWindow));
         this._cinnamonwm.connect('maximize', Lang.bind(this, this._maximizeWindow));
@@ -461,7 +459,9 @@ WindowManager.prototype = {
         Meta.keybindings_set_custom_handler('switch-group-backward',
                                             Lang.bind(this, this._startAppSwitcher));
         Meta.keybindings_set_custom_handler('switch-panels',
-                                            Lang.bind(this, this._startA11ySwitcher));
+                                            Lang.bind(this, this._startAppSwitcher));
+        Meta.keybindings_set_custom_handler('switch-panels-backward',
+                                            Lang.bind(this, this._startAppSwitcher));
 
         Main.overview.connect('showing', Lang.bind(this, function() {
             for (let i = 0; i < this._dimmedWindows.length; i++)
@@ -544,6 +544,7 @@ WindowManager.prototype = {
             delete actor.current_effect_name;
             effect._end(actor);
             cinnamonwm[effect.wmCompleteName](actor);
+            Main.panelManager.updatePanelsVisibility();
         }
     },
 
@@ -655,31 +656,22 @@ WindowManager.prototype = {
         actor._windowType = actor.meta_window.get_window_type();
         actor._notifyWindowTypeSignalId = actor.meta_window.connect('notify::window-type', Lang.bind(this, function () {
             let type = actor.meta_window.get_window_type();
-            if (type == actor._windowType)
-                return;
-            if (type == Meta.WindowType.MODAL_DIALOG ||
-                actor._windowType == Meta.WindowType.MODAL_DIALOG) {
-                let parent = actor.get_meta_window().get_transient_for();
-                if (parent)
-                    this._checkDimming(parent);
-            }
-
             actor._windowType = type;
         }));
 
+        if (actor.meta_window.is_attached_dialog()) {
+            this._checkDimming(actor.get_meta_window().get_transient_for());
+        }
+
         if (actor.get_meta_window()._cinnamonwm_has_origin === true) {
-            try {
-                this._startWindowEffect(cinnamonwm, "unminimize", actor, null, "minimize");
+            // Returns false if unable to find window origin
+            if (this._startWindowEffect(cinnamonwm, "unminimize", actor, null, "minimize"))
                 return;
-            } catch(e){
-                //catch "no origin found"
-            }
         } else if (actor.meta_window.get_window_type() == Meta.WindowType.NORMAL) {
             Main.soundManager.play('map');
         }
         this._startWindowEffect(cinnamonwm, "map", actor);
     },
-
 
     _destroyWindow : function(cinnamonwm, actor) {
 
@@ -690,6 +682,12 @@ WindowManager.prototype = {
         actor.orig_opacity = actor.opacity;
 
         let window = actor.meta_window;
+
+        if (window.is_attached_dialog()) {
+            let parent = window.get_transient_for();
+            this._checkDimming(parent, window);
+        }
+
         if (actor._notifyWindowTypeSignalId) {
             window.disconnect(actor._notifyWindowTypeSignalId);
             actor._notifyWindowTypeSignalId = 0;
@@ -740,77 +738,62 @@ WindowManager.prototype = {
                  direction == Meta.MotionDirection.DOWN_RIGHT)
                 xDest = -global.screen_width;
 
-        let switchData = {};
-        this._switchData = switchData;
-        switchData.inGroup = new Clutter.Group();
-        switchData.outGroup = new Clutter.Group();
-        switchData.windows = [];
-
-        let wgroup = global.window_group;
-        wgroup.add_actor(switchData.inGroup);
-        wgroup.add_actor(switchData.outGroup);
-
         for (let i = 0; i < windows.length; i++) {
             let window = windows[i];
 
             if (!window.meta_window.showing_on_its_workspace())
                 continue;
 
-            if (window.get_workspace() == from) {
-                switchData.windows.push({ window: window,
-                                          parent: window.get_parent() });
-                global.reparentActor(window, switchData.outGroup);
+            if ((window.meta_window == this._movingWindow) ||
+                ((global.display.get_grab_op() == Meta.GrabOp.MOVING ||
+                  global.display.get_grab_op() == Meta.GrabOp.KEYBOARD_MOVING)
+                 && window.meta_window == global.display.get_focus_window())) {
+                /* We are moving this window to the other workspace. In fact,
+                 * it is already on the other workspace, so it is hidden. We
+                 * force it to show and then don't animate it, so it stays
+                 * there while other windows move. */
+                window.show_all();
+                this._movingWindow = undefined;
+            } else if (window.get_workspace() == from) {
+                if (window.origX == undefined) {
+                    window.origX = window.x;
+                    window.origY = window.y;
+                }
+                Tweener.addTween(window,
+                        { x: window.origX + xDest,
+                          y: window.origY + yDest,
+                          time: WINDOW_ANIMATION_TIME,
+                          transition: 'easeOutQuad',
+                          onComplete: function() {
+                              window.hide();
+                              window.set_position(window.origX, window.origY);
+                              window.origX = undefined;
+                              window.origY = undefined;
+                          }
+                        });
             } else if (window.get_workspace() == to) {
-                switchData.windows.push({ window: window,
-                                          parent: window.get_parent() });
-                global.reparentActor(window, switchData.inGroup);
+                if (window.origX == undefined) {
+                    window.origX = window.x;
+                    window.origY = window.y;
+                    window.set_position(window.origX - xDest, window.origY - yDest);
+                }
+                Tweener.addTween(window,
+                        { x: window.origX,
+                          y: window.origY,
+                          time: WINDOW_ANIMATION_TIME,
+                          transition: 'easeOutQuad',
+                          onComplete: Lang.bind(window, function() {
+                              window.origX = undefined;
+                              window.origY = undefined;
+                          })
+                        });
                 window.show_all();
             }
         }
 
-        switchData.inGroup.set_position(-xDest, -yDest);
-        switchData.inGroup.raise_top();
-
-        Tweener.addTween(switchData.outGroup,
-                         { x: xDest,
-                           y: yDest,
-                           time: WINDOW_ANIMATION_TIME,
-                           transition: 'easeOutQuad',
-                           onComplete: this._switchWorkspaceDone,
-                           onCompleteScope: this,
-                           onCompleteParams: [cinnamonwm]
-                         });
-        Tweener.addTween(switchData.inGroup,
-                         { x: 0,
-                           y: 0,
-                           time: WINDOW_ANIMATION_TIME,
-                           transition: 'easeOutQuad'
-                         });
-    },
-
-    _switchWorkspaceDone : function(cinnamonwm) {
-        let switchData = this._switchData;
-        if (!switchData)
-            return;
-        this._switchData = null;
-
-        for (let i = 0; i < switchData.windows.length; i++) {
-                let w = switchData.windows[i];
-                if (w.window.is_destroyed()) // Window gone
-                    continue;
-                if (w.window.get_parent() == switchData.outGroup) {
-                    global.reparentActor(w.window, w.parent);
-                    w.window.hide();
-                } else {
-                    global.reparentActor(w.window, w.parent);
-                }
-        }
-        Tweener.removeTweens(switchData.inGroup);
-        Tweener.removeTweens(switchData.outGroup);
-        switchData.inGroup.destroy();
-        switchData.outGroup.destroy();
-
-        cinnamonwm.completed_switch_workspace();
+        Mainloop.timeout_add(WINDOW_ANIMATION_TIME * 1000, function() {
+            cinnamonwm.completed_switch_workspace();
+        });
     },
 
     _showTilePreview: function(cinnamonwm, window, tileRect, monitorIndex, snapQueued) {
@@ -826,7 +809,7 @@ WindowManager.prototype = {
     },
 
     _showHudPreview: function(cinnamonwm, currentProximityZone, workArea, snapQueued) {
-        if (!global.settings.get_boolean("hide-tile-hud")) {
+        if (global.settings.get_boolean("show-tile-hud")) {
             if (!this._hudPreview)
                 this._hudPreview = new HudPreview();
             this._hudPreview.show(currentProximityZone, workArea, snapQueued);
@@ -885,7 +868,7 @@ WindowManager.prototype = {
     },
 
     _showSnapOSD : function(metaScreen, monitorIndex) {
-        if (!global.settings.get_boolean("hide-snap-osd")) {
+        if (global.settings.get_boolean("show-snap-osd")) {
             if (this._snapOsd == null) {
                 this._snapOsd = new ModalDialog.InfoOSD();
 
@@ -926,25 +909,16 @@ WindowManager.prototype = {
         this._createAppSwitcher(binding);
     },
 
-    _startA11ySwitcher : function(display, screen, window, binding) {
-        this._createAppSwitcher(binding);
-    },
-
     _shiftWindowToWorkspace : function(window, direction) {
         if (window.get_window_type() === Meta.WindowType.DESKTOP) {
             return;
         }
+        this._movingWindow = window;
         let workspace = global.screen.get_active_workspace().get_neighbor(direction);
         if (workspace != global.screen.get_active_workspace()) {
             window.change_workspace(workspace);
-            workspace.activate(global.get_current_time());
+            workspace.activate_with_focus(window, global.get_current_time());
             this.showWorkspaceOSD();
-            Mainloop.idle_add(Lang.bind(this, function() {
-                // Unless this is done a bit later, window is sometimes not activated
-                if (window.get_workspace() == global.screen.get_active_workspace()) {
-                    window.activate(global.get_current_time());
-                }
-            }));
         }
     },
 

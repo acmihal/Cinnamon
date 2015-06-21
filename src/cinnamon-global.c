@@ -115,6 +115,7 @@ enum
  XDND_ENTER,
  NOTIFY_ERROR,
  SCALE_CHANGED,
+ SHUTDOWN,
  LAST_SIGNAL
 };
 
@@ -277,8 +278,8 @@ static void
 cinnamon_global_finalize (GObject *object)
 {
   CinnamonGlobal *global = CINNAMON_GLOBAL (object);
-
   g_object_unref (global->js_context);
+
   gtk_widget_destroy (GTK_WIDGET (global->grab_notifier));
   g_object_unref (global->settings);
   g_object_unref (global->interface_settings);
@@ -340,6 +341,15 @@ cinnamon_global_class_init (CinnamonGlobalClass *klass)
 
   cinnamon_global_signals[SCALE_CHANGED] =
       g_signal_new ("scale-changed",
+                    G_TYPE_FROM_CLASS (klass),
+                    G_SIGNAL_RUN_LAST,
+                    0,
+                    NULL, NULL,
+                    g_cclosure_marshal_VOID__VOID,
+                    G_TYPE_NONE, 0);
+
+  cinnamon_global_signals[SHUTDOWN] =
+      g_signal_new ("shutdown",
                     G_TYPE_FROM_CLASS (klass),
                     G_SIGNAL_RUN_LAST,
                     0,
@@ -993,7 +1003,9 @@ update_scale_factor (GtkSettings *settings,
     }
   }
 
-  g_settings_set_int (global->settings, "active-display-scale", scale);
+  if (g_settings_get_int (global->settings, "active-display-scale") != scale) {
+    g_settings_set_int (global->settings, "active-display-scale", scale);
+  }
 
    /* Make sure clutter and gdk scaling stays disabled
     * window-scaling-factor doesn't exist yet in clutter < 1.18 */
@@ -1111,10 +1123,11 @@ _cinnamon_global_get_gjs_context (CinnamonGlobal *global)
  */
 gboolean
 cinnamon_global_begin_modal (CinnamonGlobal *global,
-                          guint32      timestamp)
+                          guint32      timestamp,
+                          MetaModalOptions  options)
 {
   return meta_plugin_begin_modal (global->plugin, global->stage_xwindow,
-                                  None, 0, timestamp);
+                                  None, options, timestamp);
 }
 
 /**
@@ -1312,6 +1325,18 @@ cinnamon_global_reexec_self (CinnamonGlobal *global)
   execvp (arr->pdata[0], (char**)arr->pdata);
   g_warning ("failed to reexec: %s", g_strerror (errno));
   g_ptr_array_free (arr, TRUE);
+}
+
+void
+cinnamon_global_shutdown (void)
+{
+    g_signal_emit_by_name (the_object, "shutdown");
+
+    pre_exec_close_fds ();
+
+    meta_display_unmanage_screen (cinnamon_global_get_display (the_object),
+                                  cinnamon_global_get_screen (the_object),
+                                  cinnamon_global_get_current_time (the_object));
 }
 
 static void

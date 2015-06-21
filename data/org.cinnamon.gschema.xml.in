@@ -120,7 +120,7 @@
     </key>
 
     <key name="panels-scale-text-icons" type="as">
-      <default>['1:false']</default>
+      <default>['1:true']</default>
       <_summary>Scale panel applet text and icons</_summary>
       <_description>
         Whether the panel icons and text from applets is resized according to the custom panel height
@@ -337,10 +337,9 @@
     </key>
 
     <key type="i" name="number-workspaces">
-        <default>2</default>
-        <_summary>Number of workspaces in Cinnamon session</_summary>
-        <_description>
-                Number of Workspaces</_description>
+        <default>0</default>
+        <_summary>(Deprecated) Number of workspaces</_summary>
+      <_description>(Deprecated) Number of Workspaces - pre-2.6, even though you shouldn't use it even on &lt;2.6 releases. Use org.cinnamon.desktop.wm.preferences num-workspaces instead.</_description>
     </key>
 
     <key name="overview-corner" type="as">
@@ -376,10 +375,10 @@
     </key>
     
     <key name="workspace-name-overrides" type="as">
-      <default>[]</default>
-      <_summary>List of non-default workspace names</_summary>
+      <default>['DEPRECATED']</default>
+      <_summary>(Deprecated) List of non-default workspace names</_summary>
       <_description>
-        The user-set names of the workspaces.
+        (Deprecated) The user-set names of the workspaces. Deprecated since 2.6. Use org.cinnamon.desktop.wm.preferences workspace-names instead.
       </_description>
     </key>
     
@@ -493,22 +492,6 @@
       <_description>Duration of the effect (in milliseconds)</_description>
     </key>
 
-    <key name="window-list-applet-scroll" type="b">
-      <default>false</default>
-      <summary>Enable mouse-scroll in window-list applet</summary>
-      <description>
-        When enabled the mouse wheel can scroll through the items in the window list applet.
-      </description>
-    </key>
-    
-    <key name="window-list-applet-alert" type="b">
-      <default>true</default>
-      <summary>Enable window list alerts</summary>
-      <description>
-        Enable window list alerts
-      </description>
-    </key>
-
     <key name="bring-windows-to-current-workspace" type="b">
       <default>false</default>
       <summary>Brings windows requiring attention to the current workspace</summary>
@@ -578,17 +561,17 @@
       </_description>
     </key>
 
-    <key name="hide-snap-osd" type="b">
-      <default>false</default>
-      <_summary>Prevent the tile/snap OSD from showing</_summary>
+    <key name="show-snap-osd" type="b">
+      <default>true</default>
+      <_summary>Show the tile/snap OSD</_summary>
       <_description>
         Hide the snap OSD.
       </_description>
     </key>
 
-    <key name="hide-tile-hud" type="b">
-      <default>false</default>
-      <_summary>Prevent the tile HUD from showing</_summary>
+    <key name="show-tile-hud" type="b">
+      <default>true</default>
+      <_summary>Show the tile HUD</_summary>
       <_description>
         Hide the tile HUD.
       </_description>
